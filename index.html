@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local Image Tag Manager</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Local Image Tag Manager</h1>
+            <button id="load-dataset-btn">Load Dataset Folder</button>
+            <button id="save-all-btn" disabled>Save All Changes</button>
+            <button id="batch-edit-selection-btn" disabled>Edit Selected (0)</button>
+            <button id="theme-toggle-btn">Toggle Dark Mode</button>
+            <p id="status-message">Status: Ready. Load a dataset folder.</p>
+            <div id="loading-indicator" class="hidden">Loading... <progress></progress></div>
+        </header>
+
+        <main class="main-content">
+            <aside class="sidebar">
+                <section class="control-section">
+                    <details open>
+                        <summary><h2>Search & Filter</h2></summary>
+                        <div class="form-group">
+                            <label for="search-tags">Tags to Include (contains):</label>
+                            <input type="text" id="search-tags" placeholder="tag1, tag2, ...">
+                            <select id="search-mode">
+                                <option value="AND">AND (All terms)</option>
+                                <option value="OR">OR (Any term)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="exclude-tags">Tags to Exclude (exact):</label>
+                            <input type="text" id="exclude-tags" placeholder="tag3, tag4, ...">
+                        </div>
+                         <div class="form-group">
+                            <label for="filter-untagged">Show:</label>
+                            <select id="filter-untagged">
+                                <option value="all">All Images</option>
+                                <option value="tagged">Only Tagged</option>
+                                <option value="untagged">Only Untagged</option>
+                                <option value="modified">Only Modified</option>
+                            </select>
+                        </div>
+                        <button id="filter-btn">Apply Filter / Search</button>
+                        <button id="reset-filter-btn">Reset View</button>
+                    </details>
+                </section>
+
+                <section class="control-section">
+                    <details open>
+                        <summary><h2>Display Options</h2></summary>
+                        <div class="form-group">
+                            <label for="sort-property">Sort by:</label>
+                            <select id="sort-property">
+                                <option value="path">Path + Filename</option>
+                                <option value="filename">Filename Only</option>
+                                <option value="tagcount">Tag Count</option>
+                                <option value="lastmodified">Date Modified</option>
+                                <option value="filesize">File Size</option>
+                                <option value="dimensions">Image Area</option>
+                                <option value="width">Image Width</option>
+                                <option value="height">Image Height</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="sort-order">Order:</label>
+                            <select id="sort-order">
+                                <option value="asc">Ascending</option>
+                                <option value="desc">Descending</option>
+                            </select>
+                        </div>
+                        <button id="apply-sort-btn">Apply Sort</button>
+                    </details>
+                </section>
+
+                <section class="control-section">
+                    <details>
+                        <summary><h2>Bulk Tag Operations</h2></summary>
+                        <h3>Standard Operations</h3>
+                        <div class="form-group">
+                            <label for="rename-old-tag">Rename Tag:</label>
+                            <input type="text" id="rename-old-tag" placeholder="Old Tag Name">
+                            <label for="rename-new-tag">To:</label>
+                            <input type="text" id="rename-new-tag" placeholder="New Tag Name">
+                            <button id="rename-tag-btn">Rename All</button>
+                        </div>
+                        <div class="form-group">
+                            <label for="remove-tag-name">Remove Tag:</label>
+                            <input type="text" id="remove-tag-name" placeholder="Tag to Remove">
+                            <button id="remove-tag-btn">Remove All</button>
+                        </div>
+                        <div class="form-group">
+                            <label for="add-trigger-words">Add Tags:</label>
+                            <input type="text" id="add-trigger-words" placeholder="trigger1, word2">
+                            <button id="add-tags-btn">Add to All</button>
+                        </div>
+                        <div class="form-group">
+                           <button id="remove-duplicates-btn">Remove Duplicate Tags (Within Files)</button>
+                        </div>
+                        
+                        <hr>
+                        <h3>Apply Custom Rules</h3>
+                        <div class="form-group">
+                            <label for="bulk-apply-custom-rules-select">Select Rule(s) to Apply (Ctrl/Cmd+Click for multiple):</label>
+                            <select id="bulk-apply-custom-rules-select" multiple size="5">
+                            </select>
+                            <button id="bulk-apply-custom-rules-btn" disabled>Apply Selected Custom Rules</button>
+                        </div>
+                        
+                        <hr>
+                        <h3>Utilities</h3>
+                        <div class="form-group">
+                           <button id="find-duplicate-files-btn">Find Files with Identical Tags</button>
+                           <div id="duplicate-files-output" class="utility-output"></div>
+                        </div>
+                        <div class="form-group">
+                            <button id="find-orphaned-missing-btn">Find Orphaned/Missing Tag Files</button>
+                            <div id="orphaned-missing-output" class="utility-output"></div>
+                        </div>
+                        <div class="form-group">
+                            <button id="find-case-inconsistent-tags-btn">Find Case-Inconsistent Tags</button>
+                            <div id="case-inconsistent-output" class="utility-output"></div>
+                        </div>
+                        <div class="form-group">
+                            <button id="export-unique-tags-btn">Export Unique Tag List (.txt)</button>
+                        </div>
+                    </details>
+                </section>
+
+                <section class="control-section">
+                    <details>
+                        <summary><h2>Custom Tag Formatting Rules</h2></summary>
+                        <div id="custom-rules-list">
+                            <p>No custom rules defined yet.</p>
+                        </div>
+                        <button id="create-new-rule-btn">Create New Rule</button>
+                    </details>
+                </section>
+
+                <section class="control-section">
+                    <details>
+                        <summary><h2>Dataset Statistics</h2></summary>
+                        <div id="stats-summary">
+                            <p>Total Images: <span id="stat-total-images">0</span></p>
+                            <p>Unique Tags: <span id="stat-unique-tags">0</span></p>
+                            <p>Images with Modified Tags: <span id="stat-modified-images">0</span></p>
+                        </div>
+                        <h3>Tag Frequency:</h3>
+                        <div class="form-group">
+                            <input type="text" id="tag-frequency-search" placeholder="Filter tags..." aria-label="Filter tag frequency list">
+                        </div>
+                        <div id="tag-frequency-list">
+                        </div>
+                    </details>
+                </section>
+            </aside>
+
+            <section class="image-grid-container">
+                <h2>Image Grid (<span id="displayed-count">0</span> / <span id="total-count">0</span>)</h2>
+                <div id="image-grid">
+                </div>
+            </section>
+        </main>
+
+        <!-- Single Item Editor Modal -->
+        <div id="editor-modal" class="modal hidden">
+            <div class="modal-content">
+                <h2>Edit Tags</h2>
+                <div class="editor-nav-buttons">
+                    <button id="editor-prev-btn" title="Previous Image (Left Arrow)">◀</button>
+                    <button id="editor-next-btn" title="Next Image (Right Arrow)">▶</button>
+                </div>
+                <div class="editor-image-container">
+                    <img id="editor-image-preview" src="#" alt="Image Preview">
+                </div>
+                <p id="editor-filename"></p>
+                <div id="editor-metadata-display"></div>
+                <div class="tag-input-container">
+                    <textarea id="editor-tags-textarea" rows="5" placeholder="Enter tags, comma-separated"></textarea>
+                    <div id="editor-tag-suggestions" class="tag-suggestions-container hidden"></div>
+                </div>
+                <div class="editor-actions">
+                     <button id="editor-save-btn">Save Tags</button>
+                     <button id="editor-cancel-btn">Cancel/Close (Esc)</button>
+                     <button id="editor-remove-duplicates-btn">Remove Dups</button>
+                </div>
+                 <p id="editor-status"></p>
+            </div>
+        </div>
+
+        <!-- Batch Editor Modal -->
+        <div id="batch-editor-modal" class="modal hidden">
+            <div class="modal-content">
+                <h2>Batch Edit Tags (<span id="batch-editor-selected-count">0</span> items)</h2>
+                <div class="batch-tags-display">
+                    <h3>Common Tags (in all selected):</h3>
+                    <div id="batch-editor-common-tags" class="tag-display-area"><p>None</p></div>
+                </div>
+                <div class="batch-tags-display">
+                    <h3>Other Tags (from selection):</h3>
+                    <div id="batch-editor-partial-tags" class="tag-display-area"><p>None</p></div>
+                </div>
+                <div class="form-group">
+                    <label for="batch-editor-add-tags-input">Add these tags to all selected (comma-separated):</label>
+                    <textarea id="batch-editor-add-tags-input" rows="2" placeholder="e.g., new_tag, another_tag"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="batch-editor-remove-tags-input">Remove these tags from all selected (comma-separated):</label>
+                    <textarea id="batch-editor-remove-tags-input" rows="2" placeholder="e.g., old_tag, unwanted_tag"></textarea>
+                </div>
+                <div class="batch-editor-actions">
+                     <button id="batch-editor-apply-btn">Apply Changes to Selected</button>
+                     <button id="batch-editor-cancel-btn">Cancel (Esc)</button>
+                </div>
+                 <p id="batch-editor-status"></p>
+            </div>
+        </div>
+
+        <!-- Custom Rule Editor Modal -->
+        <div id="rule-editor-modal" class="modal hidden">
+            <div class="modal-content">
+                <h2 id="rule-editor-title">Create New Custom Rule</h2>
+                <input type="hidden" id="rule-id">
+                <div class="form-group">
+                    <label for="rule-name">Rule Name:</label>
+                    <input type="text" id="rule-name" placeholder="e.g., Underscores to Spaces" required>
+                </div>
+                <div class="form-group">
+                    <label for="rule-find">Find Pattern:</label>
+                    <input type="text" id="rule-find" placeholder="e.g., _ or \bword\b (if regex)">
+                </div>
+                <div class="form-group">
+                    <label for="rule-replace">Replace With:</label>
+                    <input type="text" id="rule-replace" placeholder="e.g., space or $1_new (if regex)">
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="rule-is-regex">
+                    <label for="rule-is-regex">Use Regular Expression</label>
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="rule-is-case-sensitive" disabled>
+                    <label for="rule-is-case-sensitive">Case Sensitive (Regex only, applies to Find pattern)</label>
+                </div>
+                <div class="form-group">
+                    <label for="rule-apply-to">Apply To:</label>
+                    <select id="rule-apply-to">
+                        <option value="all">All tags in a file</option>
+                        <option value="only_if_is">Only if tag IS one of these</option>
+                        <option value="not_if_is">Only if tag IS NOT one of these</option>
+                    </select>
+                </div>
+                <div id="rule-specific-tags-group" class="form-group" style="display: none;">
+                    <label for="rule-specific-tags">Specific Tags (comma-separated):</label>
+                    <textarea id="rule-specific-tags" rows="2" placeholder="tag_one, another tag"></textarea>
+                </div>
+                <div class="modal-actions">
+                     <button id="rule-editor-save-btn">Save Rule</button>
+                     <button id="rule-editor-cancel-btn">Cancel (Esc)</button>
+                </div>
+                 <p id="rule-editor-status"></p>
+            </div>
+        </div>
+
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
