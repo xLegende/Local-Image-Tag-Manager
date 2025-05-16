@@ -20,19 +20,26 @@
   --button-primary-hover-bg: #0056b3;
   --button-danger-bg: #dc3545;
   --button-danger-hover-bg: #c82333;
+  --button-warning-bg: #ffc107;
+  --button-warning-text-color: #212529;
+  --button-warning-hover-bg: #e0a800;
   --grid-item-bg: #fff;
   --grid-item-border: #ccc;
   --grid-item-hover-shadow: rgba(0, 0, 0, 0.2);
   --grid-item-selected-bg: #e0f0ff;
   --grid-item-selected-border: #007bff;
+  --grid-item-trashed-opacity: 0.6;
+  --grid-item-trashed-icon-color: var(--button-danger-bg);
   --tag-bg: #e0e0e0;
   --tag-text-color: #333;
   --tag-delete-bg: #bbb;
   --tag-delete-hover-bg: #ff8a80;
   --tag-delete-color: #fff;
-  --image-delete-bg: rgba(200, 0, 0, 0.7);
-  --image-delete-hover-bg: rgba(255, 0, 0, 0.9);
-  --image-delete-color: #fff;
+  --image-action-btn-bg: rgba(200, 0, 0, 0.7); /* For move to trash */
+  --image-action-btn-hover-bg: rgba(255, 0, 0, 0.9);
+  --image-action-btn-color: #fff;
+  --image-restore-btn-bg: rgba(0, 128, 0, 0.7); /* For restore */
+  --image-restore-btn-hover-bg: rgba(0, 160, 0, 0.9);
   --modal-bg: rgba(0, 0, 0, 0.6);
   --modal-content-bg: #fff;
   --status-color: #555;
@@ -42,7 +49,7 @@
   --link-color: #0056b3;
   --error-color: #dc3545;
   --success-color: green;
-  --utility-output-border: #ccc; /* Changed from --duplicate-output-border */
+  --utility-output-border: #ccc;
   --scrollbar-thumb-bg: #c1c1c1;
   --scrollbar-track-bg: var(--bg-color);
   --focus-outline-color: #0056b3;
@@ -78,19 +85,26 @@ body.dark-mode {
   --button-primary-hover-bg: #0b5ed7;
   --button-danger-bg: #e74c3c;
   --button-danger-hover-bg: #c0392b;
+  --button-warning-bg: #ffca2c;
+  --button-warning-text-color: #212529;
+  --button-warning-hover-bg: #f5bb00;
   --grid-item-bg: #495057;
   --grid-item-border: #6c757d;
   --grid-item-hover-shadow: rgba(255, 255, 255, 0.1);
   --grid-item-selected-bg: #3a506b;
   --grid-item-selected-border: #0d6efd;
+  --grid-item-trashed-opacity: 0.5;
+  --grid-item-trashed-icon-color: var(--button-danger-bg);
   --tag-bg: #6c757d;
   --tag-text-color: #fff;
   --tag-delete-bg: #5a6268;
   --tag-delete-hover-bg: #f44336;
   --tag-delete-color: #fff;
-  --image-delete-bg: rgba(220, 53, 69, 0.7);
-  --image-delete-hover-bg: rgba(220, 53, 69, 0.9);
-  --image-delete-color: #fff;
+  --image-action-btn-bg: rgba(220, 53, 69, 0.7);
+  --image-action-btn-hover-bg: rgba(220, 53, 69, 0.9);
+  --image-action-btn-color: #fff;
+  --image-restore-btn-bg: rgba(40, 167, 69, 0.7);
+  --image-restore-btn-hover-bg: rgba(40, 167, 69, 0.9);
   --modal-bg: rgba(0, 0, 0, 0.8);
   --modal-content-bg: #343a40;
   --status-color: #adb5bd;
@@ -100,7 +114,7 @@ body.dark-mode {
   --link-color: #6ea8fe;
   --error-color: #f88;
   --success-color: #9d9;
-  --utility-output-border: #6c757d; /* Changed */
+  --utility-output-border: #6c757d;
   --scrollbar-thumb-bg: #6c757d;
   --scrollbar-track-bg: var(--bg-color);
   --focus-outline-color: #6ea8fe;
@@ -185,13 +199,13 @@ header h1 {
   color: var(--status-color);
   margin: 5px 0;
   flex-basis: 100%;
-  order: 3;
+  order: 3; /* Ensure it's last in its row */
   text-align: left;
 }
 #loading-indicator {
   color: var(--loading-color);
   margin-left: auto;
-  order: 2;
+  order: 2; /* Before status message if on same line */
 }
 #loading-indicator progress {
   margin-left: 5px;
@@ -262,6 +276,7 @@ header h1 {
   margin-top: 5px;
   padding: 0 10px 10px 10px;
 }
+
 .form-group {
   margin-bottom: 10px;
 }
@@ -275,7 +290,7 @@ header h1 {
 .form-group input[type="password"],
 .form-group select,
 .form-group textarea {
-  width: calc(100% - 12px);
+  width: calc(100% - 12px); /* Account for padding */
   padding: 5px;
   border: 1px solid var(--input-border);
   border-radius: 3px;
@@ -295,6 +310,7 @@ header h1 {
 .form-group textarea::placeholder {
   color: color-mix(in srgb, var(--input-text-color) 60%, transparent);
 }
+
 button {
   padding: 6px 12px;
   cursor: pointer;
@@ -315,7 +331,8 @@ button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
-#save-all-btn,
+
+#save-all-btn, /* Primary actions */
 #filter-btn,
 #editor-save-btn,
 #apply-sort-btn,
@@ -338,6 +355,18 @@ button:disabled {
   background-color: var(--button-primary-hover-bg);
   border-color: var(--button-primary-hover-bg);
 }
+
+#empty-trash-btn:not(:disabled),
+#batch-editor-move-to-trash-btn:not(:disabled) { /* Danger action */
+  background-color: var(--button-danger-bg);
+  color: var(--button-primary-text-color); /* Keep text white for danger */
+  border-color: var(--button-danger-bg);
+}
+#empty-trash-btn:hover:not(:disabled),
+#batch-editor-move-to-trash-btn:hover:not(:disabled) {
+  background-color: var(--button-danger-hover-bg);
+  border-color: var(--button-danger-hover-bg);
+}
 button.delete-rule-btn {
   background-color: var(--button-danger-bg);
   color: var(--button-primary-text-color);
@@ -348,6 +377,8 @@ button.delete-rule-btn:hover:not(:disabled) {
   background-color: var(--button-danger-hover-bg);
   border-color: var(--button-danger-hover-bg);
 }
+
+
 .image-grid-container {
   flex-grow: 1;
   overflow-y: auto;
@@ -371,12 +402,13 @@ button.delete-rule-btn:hover:not(:disabled) {
     box-shadow 0.2s ease,
     background-color 0.3s ease,
     border-color 0.3s ease,
+    opacity 0.3s ease, /* For trashed items */
     outline 0.1s ease;
   position: relative;
-  overflow: hidden;
+  overflow: hidden; /* Important for absolute positioned children */
   display: flex;
   flex-direction: column;
-  cursor: default;
+  cursor: default; /* Default, img itself is pointer */
   outline: 3px solid transparent;
   outline-offset: -1px;
 }
@@ -422,7 +454,7 @@ button.delete-rule-btn:hover:not(:disabled) {
   content: "*";
   position: absolute;
   top: 2px;
-  right: 22px;
+  right: 22px; /* Adjusted for new action button */
   color: var(--modified-indicator-color);
   font-size: 1.2em;
   font-weight: bold;
@@ -430,18 +462,31 @@ button.delete-rule-btn:hover:not(:disabled) {
   z-index: 2;
   pointer-events: none;
 }
-.image-delete-btn {
+
+.grid-item.trashed-item {
+  opacity: var(--grid-item-trashed-opacity);
+}
+.grid-item.trashed-item img {
+  cursor: default; /* Not editable when trashed */
+}
+.grid-item.trashed-item .tag-delete-btn {
+    display: none; /* No tag editing on trashed items */
+}
+.grid-item.trashed-item:hover {
+  opacity: calc(var(--grid-item-trashed-opacity) + 0.2); /* Slightly less opaque on hover */
+}
+
+.image-action-btn {
   position: absolute;
   top: 2px;
   right: 3px;
   width: 16px;
   height: 16px;
-  line-height: 16px;
+  line-height: 16px; /* Vertically center text/icon */
   text-align: center;
   font-size: 12px;
   font-weight: bold;
-  background-color: var(--image-delete-bg);
-  color: var(--image-delete-color);
+  color: var(--image-action-btn-color);
   border-radius: 50%;
   cursor: pointer;
   z-index: 3;
@@ -451,39 +496,51 @@ button.delete-rule-btn:hover:not(:disabled) {
     background-color 0.2s ease,
     transform 0.2s ease;
 }
-.grid-item:hover .image-delete-btn {
+.grid-item:hover .image-action-btn {
   opacity: 1;
 }
-.image-delete-btn:hover {
-  background-color: var(--image-delete-hover-bg);
+.image-action-btn.move-to-trash-btn {
+  background-color: var(--image-action-btn-bg);
+}
+.image-action-btn.move-to-trash-btn:hover {
+  background-color: var(--image-action-btn-hover-bg);
   transform: scale(1.1);
 }
+.image-action-btn.restore-btn {
+  background-color: var(--image-restore-btn-bg);
+  font-size: 10px; /* Adjust if using an icon like ♻ */
+}
+.image-action-btn.restore-btn:hover {
+  background-color: var(--image-restore-btn-hover-bg);
+  transform: scale(1.1);
+}
+
 .grid-item .tags {
   font-size: 0.8em;
   word-wrap: break-word;
   max-height: 60px;
   overflow-y: auto;
   line-height: 1.4;
-  margin-top: auto;
+  margin-top: auto; /* Pushes tags to bottom */
   padding-top: 3px;
 }
 .grid-item .tag {
   display: inline-block;
   background-color: var(--tag-bg);
   color: var(--tag-text-color);
-  padding: 2px 18px 2px 5px;
+  padding: 2px 18px 2px 5px; /* Space for delete btn */
   margin: 2px;
   border-radius: 3px;
   transition:
     background-color 0.3s ease,
     color 0.3s ease;
-  position: relative;
+  position: relative; /* For absolute positioning of delete btn */
   cursor: default;
 }
 .grid-item .tags:empty {
   color: var(--status-color);
   font-style: italic;
-  min-height: 1em;
+  min-height: 1em; /* Ensure it takes up some space */
   padding: 5px 0;
 }
 .tag-delete-btn {
@@ -492,7 +549,7 @@ button.delete-rule-btn:hover:not(:disabled) {
   right: 2px;
   width: 14px;
   height: 14px;
-  line-height: 14px;
+  line-height: 14px; /* Center text */
   text-align: center;
   font-size: 10px;
   font-weight: bold;
@@ -515,6 +572,8 @@ button.delete-rule-btn:hover:not(:disabled) {
 .tag-delete-btn:hover {
   background-color: var(--tag-delete-hover-bg);
 }
+
+/* Modal Styles (unchanged unless specified) */
 .modal {
   position: fixed;
   left: 0;
@@ -550,6 +609,7 @@ button.delete-rule-btn:hover:not(:disabled) {
 body.dark-mode .modal-content {
   box-shadow: 0 5px 15px rgba(255, 255, 255, 0.1);
 }
+
 #editor-metadata-display {
   font-size: 0.8em;
   color: var(--editor-metadata-color);
@@ -558,36 +618,39 @@ body.dark-mode .modal-content {
   text-align: center;
   line-height: 1.3;
 }
+
 .editor-nav-buttons {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 10px;
-  position: absolute;
-  top: 15px;
-  left: 15px;
-  right: 15px;
-  z-index: 10;
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px; /* Add some space below nav buttons */
+    position: absolute; /* Position relative to modal-content */
+    top: 15px;
+    left: 15px;
+    right: 15px;
+    z-index: 10; /* Above image preview if it overlaps */
 }
 .editor-nav-buttons button {
-  padding: 5px 10px;
-  font-size: 1.2em;
-  line-height: 1;
-  margin-top: 0;
+    padding: 5px 10px;
+    font-size: 1.2em; /* Make them a bit bigger */
+    line-height: 1;
+    margin-top: 0; /* Reset margin from global button style */
 }
+
 .editor-image-container {
-  position: relative;
-  display: inline-block;
-  margin: 0 auto 15px auto;
+  position: relative; /* For potential overlay elements */
+  display: inline-block; /* To center it */
+  margin: 0 auto 15px auto; /* Auto margins for horizontal centering */
   max-width: 100%;
-  margin-top: 30px;
+  margin-top: 30px; /* Ensure space from nav buttons */
 }
+
 #editor-image-preview {
   max-width: 100%;
-  max-height: 300px;
+  max-height: 300px; /* Limit initial height */
   height: auto;
   border-radius: 4px;
-  background-color: var(--bg-color);
-  display: block;
+  background-color: var(--bg-color); /* Placeholder while loading */
+  display: block; /* Remove extra space below */
   cursor: zoom-in;
   transition: transform 0.3s ease;
 }
@@ -598,15 +661,17 @@ body.dark-mode .modal-content {
   width: 100vw;
   height: 100vh;
   object-fit: contain;
-  background-color: var(--modal-bg);
-  z-index: 1005;
+  background-color: var(--modal-bg); /* Darker overlay for zoom */
+  z-index: 1005; /* Above modal, below other potential popups */
   cursor: zoom-out;
-  padding: 20px;
+  padding: 20px; /* Give some breathing room */
   box-sizing: border-box;
   border-radius: 0;
-  max-width: none !important;
+  max-width: none !important; /* Override constraints */
   max-height: none !important;
 }
+
+/* Hide other modal content when image is zoomed */
 .modal-content.image-zoomed > *:not(.editor-image-container) {
   display: none !important;
 }
@@ -615,12 +680,13 @@ body.dark-mode .modal-content {
   height: 100%;
   margin: 0;
 }
+
 .tag-input-container {
-  position: relative;
+  position: relative; /* For suggestions box */
   margin-bottom: 15px;
 }
 #editor-tags-textarea {
-  width: calc(100% - 20px);
+  width: calc(100% - 20px); /* Account for padding of modal */
   padding: 8px;
   border: 1px solid var(--input-border);
   border-radius: 3px;
@@ -635,11 +701,11 @@ body.dark-mode .modal-content {
   border: 1px solid var(--suggestions-border);
   border-top: none;
   border-radius: 0 0 3px 3px;
-  width: calc(100% - 20px);
-  left: 10px;
+  width: calc(100% - 20px); /* Match textarea */
+  left: 10px; /* Align with textarea padding */
   max-height: 150px;
   overflow-y: auto;
-  z-index: 1010;
+  z-index: 1010; /* Above other elements */
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
   text-align: left;
 }
@@ -667,6 +733,7 @@ body.dark-mode .tag-suggestions-container {
   background-color: var(--suggestions-item-active-bg);
   font-weight: bold;
 }
+
 .editor-actions button,
 .batch-editor-actions button,
 #rule-editor-modal .modal-actions button {
@@ -674,15 +741,18 @@ body.dark-mode .tag-suggestions-container {
   margin: 0 5px;
   cursor: pointer;
 }
+
 #editor-status,
 #batch-editor-status,
 #rule-editor-status {
   margin-top: 10px;
   font-style: italic;
-  color: var(--success-color);
+  color: var(--success-color); /* Default to success */
   min-height: 1.2em;
   text-align: center;
 }
+
+/* Batch Editor Modal Specifics */
 #batch-editor-modal .modal-content {
   max-width: 700px;
   text-align: left;
@@ -709,9 +779,9 @@ body.dark-mode .tag-suggestions-container {
   max-height: 100px;
   overflow-y: auto;
   font-size: 0.9em;
-  padding: 5px;
+  padding: 5px; /* Add some padding inside */
 }
-.tag-display-area p {
+.tag-display-area p { /* For 'None' message */
   margin: 0;
   font-style: italic;
   color: var(--status-color);
@@ -735,12 +805,12 @@ body.dark-mode .tag-suggestions-container {
 }
 #batch-editor-modal .form-group label,
 #rule-editor-modal .form-group label {
-  font-weight: normal;
+  font-weight: normal; /* Less bold than sidebar labels */
   margin-bottom: 5px;
 }
 #batch-editor-modal textarea,
 #rule-editor-modal textarea {
-  width: calc(100% - 12px);
+  width: calc(100% - 12px); /* Account for padding */
   padding: 8px;
   font-size: 0.95em;
   resize: vertical;
@@ -751,10 +821,20 @@ body.dark-mode .tag-suggestions-container {
   margin-top: 15px;
   padding-top: 10px;
   border-top: 1px solid var(--border-light-color);
+  display: flex; /* For better button alignment */
+  justify-content: flex-end; /* Align buttons to the right */
+  gap: 10px; /* Space between buttons */
 }
+.batch-editor-actions button {
+    margin-left: 0; /* Reset individual margins if any were set by global button style */
+}
+
+
 .hidden {
   display: none !important;
 }
+
+/* Tag Frequency List */
 #tag-frequency-list {
   max-height: 200px;
   overflow-y: auto;
@@ -763,8 +843,8 @@ body.dark-mode .tag-suggestions-container {
   padding: 5px;
   border-radius: 3px;
 }
-#tag-frequency-search + #tag-frequency-list {
-  margin-top: 5px;
+#tag-frequency-search + #tag-frequency-list { /* Space after search */
+    margin-top: 5px;
 }
 #tag-frequency-list div {
   display: flex;
@@ -779,7 +859,7 @@ body.dark-mode .tag-suggestions-container {
     var(--container-bg)
   );
 }
-#tag-frequency-list span:first-child {
+#tag-frequency-list span:first-child { /* Tag name */
   max-width: 70%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -793,7 +873,7 @@ body.dark-mode .tag-suggestions-container {
   text-decoration-color: var(--link-color);
   background-color: var(--tag-frequency-clickable-hover-bg);
 }
-#tag-frequency-list span:last-child {
+#tag-frequency-list span:last-child { /* Count */
   font-weight: bold;
   color: var(--link-color);
 }
@@ -822,15 +902,16 @@ body.dark-mode .tag-suggestions-container {
   margin-left: 20px;
 }
 .utility-output .tag-group {
-  margin-bottom: 8px;
+    margin-bottom: 8px;
 }
 .utility-output .tag-group strong {
-  display: block;
-  margin-bottom: 3px;
+    display: block;
+    margin-bottom: 3px;
 }
 .utility-output .tag-group ul {
-  margin-left: 5px;
+    margin-left: 5px;
 }
+
 
 /* Custom Rule Editor Styles */
 #rule-editor-modal .modal-content {
@@ -842,7 +923,7 @@ body.dark-mode .tag-suggestions-container {
   margin-bottom: 20px;
 }
 #rule-editor-modal .checkbox-group label {
-  font-weight: normal;
+  font-weight: normal; /* Match batch editor */
 }
 #rule-specific-tags-group {
   margin-top: 10px;
@@ -850,49 +931,50 @@ body.dark-mode .tag-suggestions-container {
   border: 1px dashed var(--border-color);
   border-radius: 3px;
 }
+
 #custom-rules-list {
-  max-height: 250px;
-  overflow-y: auto;
+    max-height: 250px;
+    overflow-y: auto;
 }
-#custom-rules-list p {
-  font-style: italic;
-  color: var(--status-color);
-  padding: 10px 0;
+#custom-rules-list p { /* For "no rules" message */
+    font-style: italic;
+    color: var(--status-color);
+    padding: 10px 0;
 }
 .custom-rule-item-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
+    list-style: none;
+    padding: 0;
+    margin: 0;
 }
 .custom-rule-item-list li {
-  background-color: var(--custom-rule-item-bg);
-  border: 1px solid var(--custom-rule-item-border);
-  padding: 8px 10px;
-  margin-bottom: 5px;
-  border-radius: 3px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
+    background-color: var(--custom-rule-item-bg);
+    border: 1px solid var(--custom-rule-item-border);
+    padding: 8px 10px;
+    margin-bottom: 5px;
+    border-radius: 3px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap; /* Allow wrapping for actions */
 }
 .custom-rule-item-list .rule-name {
-  font-weight: bold;
-  flex-basis: 100%;
-  margin-bottom: 3px;
+    font-weight: bold;
+    flex-basis: 100%; /* Take full width for name */
+    margin-bottom: 3px;
 }
 .custom-rule-item-list .rule-summary {
-  font-size: 0.85em;
-  color: var(--status-color);
-  flex-grow: 1;
-  margin-right: 10px;
-  word-break: break-all;
+    font-size: 0.85em;
+    color: var(--status-color);
+    flex-grow: 1;
+    margin-right: 10px;
+    word-break: break-all; /* Prevent long patterns from breaking layout */
 }
 .custom-rule-item-list .rule-actions button {
-  font-size: 0.85em;
-  padding: 3px 6px;
-  margin-top: 0;
+    font-size: 0.85em;
+    padding: 3px 6px;
+    margin-top: 0; /* Override global button margin */
 }
 
 #bulk-apply-custom-rules-select {
-  min-height: 60px;
+    min-height: 60px; /* Show a few options */
 }

@@ -12,6 +12,7 @@
             <h1>Local Image Tag Manager</h1>
             <button id="load-dataset-btn">Load Dataset Folder</button>
             <button id="save-all-btn" disabled>Save All Changes</button>
+            <button id="empty-trash-btn" disabled>Empty Trash (0)</button>
             <button id="batch-edit-selection-btn" disabled>Edit Selected (0)</button>
             <button id="theme-toggle-btn">Toggle Dark Mode</button>
             <p id="status-message">Status: Ready. Load a dataset folder.</p>
@@ -38,10 +39,11 @@
                          <div class="form-group">
                             <label for="filter-untagged">Show:</label>
                             <select id="filter-untagged">
-                                <option value="all">All Images</option>
+                                <option value="all">All Active Images</option>
                                 <option value="tagged">Only Tagged</option>
                                 <option value="untagged">Only Untagged</option>
                                 <option value="modified">Only Modified</option>
+                                <option value="trashed">Only Trashed</option>
                             </select>
                         </div>
                         <button id="filter-btn">Apply Filter / Search</button>
@@ -79,7 +81,7 @@
                 <section class="control-section">
                     <details>
                         <summary><h2>Bulk Tag Operations</h2></summary>
-                        <h3>Standard Operations</h3>
+                        <h3>Standard Operations (on active images)</h3>
                         <div class="form-group">
                             <label for="rename-old-tag">Rename Tag:</label>
                             <input type="text" id="rename-old-tag" placeholder="Old Tag Name">
@@ -102,7 +104,7 @@
                         </div>
                         
                         <hr>
-                        <h3>Apply Custom Rules</h3>
+                        <h3>Apply Custom Rules (on active images)</h3>
                         <div class="form-group">
                             <label for="bulk-apply-custom-rules-select">Select Rule(s) to Apply (Ctrl/Cmd+Click for multiple):</label>
                             <select id="bulk-apply-custom-rules-select" multiple size="5">
@@ -111,7 +113,7 @@
                         </div>
                         
                         <hr>
-                        <h3>Utilities</h3>
+                        <h3>Utilities (on active images)</h3>
                         <div class="form-group">
                            <button id="find-duplicate-files-btn">Find Files with Identical Tags</button>
                            <div id="duplicate-files-output" class="utility-output"></div>
@@ -142,13 +144,13 @@
 
                 <section class="control-section">
                     <details>
-                        <summary><h2>Dataset Statistics</h2></summary>
+                        <summary><h2>Dataset Statistics (Active Images)</h2></summary>
                         <div id="stats-summary">
-                            <p>Total Images: <span id="stat-total-images">0</span></p>
-                            <p>Unique Tags: <span id="stat-unique-tags">0</span></p>
-                            <p>Images with Modified Tags: <span id="stat-modified-images">0</span></p>
+                            <p>Total Active Images: <span id="stat-total-images">0</span></p>
+                            <p>Unique Tags (Active): <span id="stat-unique-tags">0</span></p>
+                            <p>Modified Tags (Active): <span id="stat-modified-images">0</span></p>
                         </div>
-                        <h3>Tag Frequency:</h3>
+                        <h3>Tag Frequency (Active Images):</h3>
                         <div class="form-group">
                             <input type="text" id="tag-frequency-search" placeholder="Filter tags..." aria-label="Filter tag frequency list">
                         </div>
@@ -159,7 +161,7 @@
             </aside>
 
             <section class="image-grid-container">
-                <h2>Image Grid (<span id="displayed-count">0</span> / <span id="total-count">0</span>)</h2>
+                <h2>Image Grid (<span id="displayed-count">0</span> / <span id="total-count">0</span> Active)</h2>
                 <div id="image-grid">
                 </div>
             </section>
@@ -212,7 +214,8 @@
                     <textarea id="batch-editor-remove-tags-input" rows="2" placeholder="e.g., old_tag, unwanted_tag"></textarea>
                 </div>
                 <div class="batch-editor-actions">
-                     <button id="batch-editor-apply-btn">Apply Changes to Selected</button>
+                     <button id="batch-editor-move-to-trash-btn">Move Selected to Trash</button>
+                     <button id="batch-editor-apply-btn">Apply Tag Changes</button>
                      <button id="batch-editor-cancel-btn">Cancel (Esc)</button>
                 </div>
                  <p id="batch-editor-status"></p>

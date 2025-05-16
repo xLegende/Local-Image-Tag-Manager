@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- DOM Elements ---
     const loadDatasetBtn = document.getElementById('load-dataset-btn');
     const saveAllBtn = document.getElementById('save-all-btn');
+    const emptyTrashBtn = document.getElementById('empty-trash-btn');
     const batchEditSelectionBtn = document.getElementById('batch-edit-selection-btn');
     const themeToggleBtn = document.getElementById('theme-toggle-btn');
     const statusMessage = document.getElementById('status-message');
@@ -62,6 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const batchEditorAddTagsInput = document.getElementById('batch-editor-add-tags-input');
     const batchEditorRemoveTagsInput = document.getElementById('batch-editor-remove-tags-input');
     const batchEditorApplyBtn = document.getElementById('batch-editor-apply-btn');
+    const batchEditorMoveToTrashBtn = document.getElementById('batch-editor-move-to-trash-btn');
     const batchEditorCancelBtn = document.getElementById('batch-editor-cancel-btn');
     const batchEditorStatus = document.getElementById('batch-editor-status');
 
@@ -93,17 +95,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- State Variables ---
     let datasetHandle = null;
-    let allImageData = []; // Holds { imageHandle, tagHandle, imageName, relativePath, imageUrl, tags, originalTags, modified, id, fileSize, lastModified, imageWidth, imageHeight }
-    let allFileSystemEntries = new Map(); // Holds all discovered file/dir handles with their full relative path as key. This is for Orphaned/Missing checks.
-    let displayedImageDataIndices = [];
-    let currentEditIndex = -1;
+    // Holds { imageHandle, tagHandle, imageName, relativePath, imageUrl, tags, originalTags, modified, id, fileSize, lastModified, imageWidth, imageHeight, isTrashed }
+    let allImageData = []; 
+    let allFileSystemEntries = new Map();
+    let displayedImageDataIndices = []; // Indices into allImageData
+    let currentEditIndex = -1; // Index in allImageData
     let currentEditOriginalTagsString = '';
     let tagFrequencies = new Map();
     let uniqueTags = new Set();
     let nextItemId = 0;
-    let initialTotalCount = 0;
     let debouncedUpdateFrequencyList = null;
-    let keyboardFocusIndex = -1;
+    let keyboardFocusIndex = -1; // Index in displayedImageDataIndices
 
     let selectedItemIds = new Set();
     let lastInteractedItemId = null;
@@ -144,6 +146,16 @@ document.addEventListener('DOMContentLoaded', () => {
              .replace(/"/g, "&quot;")
              .replace(/'/g, "&#039;");
     }
+
+    function getActiveItems() {
+        return allImageData.filter(item => !item.isTrashed);
+    }
+    
+    function getActiveItemById(itemId) {
+        const item = allImageData.find(i => i.id === itemId);
+        return (item && !item.isTrashed) ? item : null;
+    }
+
 
     // --- Theme Management ---
     function applyTheme(theme) {
@@ -192,6 +204,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         console.log(message);
     }
+
     async function processDirectoryRecursively(directoryHandle, fileHandlesMap, currentPath = '') {
         allFileSystemEntries.set(currentPath || '.', { handle: directoryHandle, kind: 'directory', name: directoryHandle.name });
         try {
@@ -205,14 +218,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     const baseNameWithoutExt = lowerCaseName.substring(0, lowerCaseName.lastIndexOf('.'));
                     const mapKey = currentPath ? `${currentPath}/${baseNameWithoutExt}` : baseNameWithoutExt;
                     
-                    const originalNameNoExt = entry.name.substring(0, entry.name.lastIndexOf('.'));
-                    
                     let pair = fileHandlesMap.get(mapKey) || {
                         imageHandle: null,
                         tagHandle: null,
-                        originalImageName: null, // Store original case for image name
-                        originalTagName: null,   // Store original case for tag name
-                        baseNameKey: mapKey,     // Store the case-insensitive base name key
+                        originalImageName: null, 
+                        originalTagName: null,   
+                        baseNameKey: mapKey,     
                         relativePath: currentPath
                     };
 
@@ -237,6 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
             updateStatus(`Warning: Could not fully access directory "${currentPath}/${directoryHandle.name}". Some files might be missed.`, false);
         }
     }
+
     async function loadDataset() {
         try {
             if (!window.showDirectoryPicker) {
@@ -252,7 +264,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             updateStatus('Scanning directory structure...', true, true);
-            let fileHandlesMap = new Map(); // Key: relativePath/baseName (lowercase, no ext), Value: {imageHandle, tagHandle, originalImageName, originalTagName, relativePath}
+            let fileHandlesMap = new Map(); 
             allFileSystemEntries.clear();
 
             if (await datasetHandle.queryPermission({ mode: 'readwrite' }) !== 'granted' &&
@@ -271,7 +283,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (progressElement) progressElement.max = totalFilesToProcess;
 
             for (const [, pair] of fileHandlesMap.entries()) {
-                if (pair.imageHandle) { // Prioritize pairs with an image
+                if (pair.imageHandle) { 
                     let tags = [];
                     let originalTags = '';
                     let tagHandle = pair.tagHandle;
@@ -304,9 +316,9 @@ document.addEventListener('DOMContentLoaded', () => {
                         allImageData.push({
                             imageHandle: pair.imageHandle,
                             tagHandle: tagHandle,
-                            imageName: imageNameForRecord, // Base name without extension, original case from image
-                            originalFullImageName: pair.originalImageName, // Full original image filename
-                            originalFullTagName: pair.originalTagName, // Full original tag filename (if exists)
+                            imageName: imageNameForRecord, 
+                            originalFullImageName: pair.originalImageName, 
+                            originalFullTagName: pair.originalTagName, 
                             relativePath: pair.relativePath,
                             imageUrl: imageUrl,
                             tags: tags,
@@ -317,8 +329,10 @@ document.addEventListener('DOMContentLoaded', () => {
                             lastModified: imageFile.lastModified,
                             imageWidth: dimensions.width,
                             imageHeight: dimensions.height,
+                            isTrashed: false, // New property for trash system
                         });
-                        updateTagStats(tags, [], true);
+                        // Initial tag stats update only considers non-trashed items, so this is fine
+                        updateTagStats(tags, [], true); 
                     } catch (e) {
                         console.warn(`Image processing error for ${imageNameForRecord}: ${e.message}`);
                     }
@@ -327,13 +341,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (progressElement) progressElement.value = processedCount;
             }
 
-            initialTotalCount = allImageData.length;
-            displayedImageDataIndices = allImageData.map((_, i) => i);
+            displayedImageDataIndices = getActiveItems().map(item => allImageData.indexOf(item));
             currentSortProperty = sortPropertySelect.value;
             currentSortOrder = sortOrderSelect.value;
-            sortAndRender();
-            updateStatisticsDisplay();
-            saveAllBtn.disabled = true;
+            sortAndRender(); // This will internally use getActiveItems for display
+            updateSaveAllButtonState();
+            updateEmptyTrashButtonState();
         } catch (error) {
             if (error.name === 'AbortError') updateStatus('Dataset loading cancelled.');
             else updateStatus(`Error loading dataset: ${error.message}`);
@@ -356,15 +369,15 @@ document.addEventListener('DOMContentLoaded', () => {
         uniqueTags.clear();
         imageGrid.innerHTML = '';
         tagFrequencySearchInput.value = '';
-        updateStatisticsDisplay();
+        updateStatisticsDisplay(); // Will show 0s
         updateDisplayedCount();
-        saveAllBtn.disabled = true;
+        updateSaveAllButtonState();
+        updateEmptyTrashButtonState();
         duplicateFilesOutput.innerHTML = '';
         orphanedMissingOutput.innerHTML = '';
         caseInconsistentOutput.innerHTML = '';
         currentEditIndex = -1;
         nextItemId = 0;
-        initialTotalCount = 0;
         currentSortProperty = 'path';
         sortPropertySelect.value = currentSortProperty;
         currentSortOrder = 'asc';
@@ -384,21 +397,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function clearKeyboardFocus() {
-        if (keyboardFocusIndex !== -1 && displayedImageDataIndices.length > 0 && allImageData[displayedImageDataIndices[keyboardFocusIndex]]) {
-            const oldItemId = allImageData[displayedImageDataIndices[keyboardFocusIndex]]?.id;
-            if (oldItemId) {
-                document.getElementById(oldItemId)?.classList.remove('keyboard-focus');
+        if (keyboardFocusIndex !== -1 && displayedImageDataIndices.length > 0 && displayedImageDataIndices[keyboardFocusIndex] !== undefined ) {
+            const globalIndex = displayedImageDataIndices[keyboardFocusIndex];
+            if (allImageData[globalIndex]) {
+                 const oldItemId = allImageData[globalIndex].id;
+                 document.getElementById(oldItemId)?.classList.remove('keyboard-focus');
             }
         }
         keyboardFocusIndex = -1;
     }
 
-    function setKeyboardFocus(newIndex) {
+    function setKeyboardFocus(newIndex) { // newIndex is index into displayedImageDataIndices
         if (newIndex < 0 || newIndex >= displayedImageDataIndices.length) return;
         clearKeyboardFocus();
         keyboardFocusIndex = newIndex;
-        const currentItemId = allImageData[displayedImageDataIndices[keyboardFocusIndex]]?.id;
-        if (currentItemId) {
+        const globalIndex = displayedImageDataIndices[keyboardFocusIndex];
+        if (allImageData[globalIndex]) {
+            const currentItemId = allImageData[globalIndex].id;
             const element = document.getElementById(currentItemId);
             if (element) {
                 element.classList.add('keyboard-focus');
@@ -414,29 +429,49 @@ document.addEventListener('DOMContentLoaded', () => {
         clearKeyboardFocus();
         imageGrid.innerHTML = '';
         const fragment = document.createDocumentFragment();
+
         displayedImageDataIndices.forEach((globalIndex, displayIndex) => {
             const item = allImageData[globalIndex];
-            if (!item) return;
+            if (!item) return; // Should not happen if displayedImageDataIndices is correct
+
             const div = document.createElement('div');
             div.classList.add('grid-item');
-            div.dataset.globalIndex = globalIndex;
-            div.dataset.displayIndex = displayIndex;
+            div.dataset.globalIndex = globalIndex; // Store global index for easier lookup
+            div.dataset.displayIndex = displayIndex; // Store current display index
             div.id = item.id;
+
             if (item.modified) div.classList.add('modified');
+            if (item.isTrashed) div.classList.add('trashed-item');
             if (selectedItemIds.has(item.id)) div.classList.add('selected');
-            div.tabIndex = -1;
-            div.style.outline = 'none';
+
+            div.tabIndex = -1; // For focus management, though actual focus handled by keyboard-focus class
+            div.style.outline = 'none'; // Remove default focus outline
+
             div.addEventListener('click', (e) => handleGridItemInteraction(e, item.id, globalIndex, displayIndex));
-            const imgDeleteBtn = document.createElement('span');
-            imgDeleteBtn.classList.add('image-delete-btn');
-            imgDeleteBtn.textContent = '×';
-            const deleteTitle = item.relativePath ? `Remove image "${item.relativePath}/${item.originalFullImageName}" (from view)` : `Remove image "${item.originalFullImageName}" (from view)`;
-            imgDeleteBtn.title = deleteTitle;
-            imgDeleteBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                requestImageDeletion(item.id);
-            });
-            div.appendChild(imgDeleteBtn);
+
+            // Action button (Move to Trash / Restore)
+            const actionBtn = document.createElement('span');
+            actionBtn.classList.add('image-action-btn');
+            if (item.isTrashed) {
+                actionBtn.classList.add('restore-btn');
+                actionBtn.textContent = '♻'; // Restore icon (or text)
+                actionBtn.title = `Restore "${item.originalFullImageName}" from trash`;
+                actionBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    restoreFromTrash(item.id);
+                });
+            } else {
+                actionBtn.classList.add('move-to-trash-btn');
+                actionBtn.textContent = '×'; // Delete icon
+                const deleteTitle = item.relativePath ? `Move "${item.relativePath}/${item.originalFullImageName}" to trash` : `Move "${item.originalFullImageName}" to trash`;
+                actionBtn.title = deleteTitle;
+                actionBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    promptMoveToTrash(item.id);
+                });
+            }
+            div.appendChild(actionBtn);
+
             const img = document.createElement('img');
             img.src = item.imageUrl;
             const imgAlt = item.relativePath ? `${item.relativePath}/${item.originalFullImageName}` : item.originalFullImageName;
@@ -444,10 +479,12 @@ document.addEventListener('DOMContentLoaded', () => {
             img.title = `${imgAlt}\nSize: ${item.imageWidth}x${item.imageHeight}\nModified: ${new Date(item.lastModified).toLocaleDateString()}`;
             img.loading = 'lazy';
             div.appendChild(img);
+
             const tagsDiv = document.createElement('div');
             tagsDiv.classList.add('tags');
-            renderTagsForItem(tagsDiv, item);
+            renderTagsForItem(tagsDiv, item); // Pass item itself
             div.appendChild(tagsDiv);
+
             fragment.appendChild(div);
         });
         imageGrid.appendChild(fragment);
@@ -455,70 +492,70 @@ document.addEventListener('DOMContentLoaded', () => {
         updateBatchEditButtonState();
     }
 
+
     function handleGridItemInteraction(event, itemId, globalItemIndex, displayItemIndex) {
+        const item = allImageData[globalItemIndex];
+        if (!item) return; // Should not happen
+
+        // Clicking on the image of a non-trashed item, if it's the only selected item, opens editor
         const isImageClick = event.target.tagName === 'IMG';
+        const canOpenEditor = !item.isTrashed && isImageClick;
+
         if (event.shiftKey && lastInteractedItemId && lastInteractedItemId !== itemId) {
+            // Find display indices for range selection
             const lastInteractedGlobalIndex = findIndexById(lastInteractedItemId);
-            if (lastInteractedGlobalIndex === -1) {
-                lastInteractedItemId = null;
+            const lastInteractedDisplayIndex = displayedImageDataIndices.indexOf(lastInteractedGlobalIndex);
+            const currentDisplayIndex = displayItemIndex;
+
+            if (lastInteractedDisplayIndex === -1 || currentDisplayIndex === -1) { // One of them isn't in current display
                 const wasSelected = selectedItemIds.has(itemId);
                 const wasOnlySelection = wasSelected && selectedItemIds.size === 1;
-                if (wasOnlySelection) {
+                if(wasOnlySelection) {
                     selectedItemIds.delete(itemId);
                     document.getElementById(itemId)?.classList.remove('selected');
                     lastInteractedItemId = null;
                 } else {
                     clearSelection();
-                    addSelection(itemId);
-                    lastInteractedItemId = itemId;
+                    if (!item.isTrashed) addSelection(itemId); // Only select non-trashed
+                    lastInteractedItemId = item.isTrashed ? null : itemId;
                 }
             } else {
-                const lastInteractedDisplayIndex = displayedImageDataIndices.indexOf(lastInteractedGlobalIndex);
-                const currentDisplayIndex = displayItemIndex;
-                if (lastInteractedDisplayIndex === -1) {
-                    const wasSelected = selectedItemIds.has(itemId);
-                    const wasOnlySelection = wasSelected && selectedItemIds.size === 1;
-                    if (wasOnlySelection) {
-                        selectedItemIds.delete(itemId);
-                        document.getElementById(itemId)?.classList.remove('selected');
-                        lastInteractedItemId = null;
-                    } else {
-                        clearSelection();
-                        addSelection(itemId);
-                        lastInteractedItemId = itemId;
-                    }
-                } else {
-                    const start = Math.min(lastInteractedDisplayIndex, currentDisplayIndex);
-                    const end = Math.max(lastInteractedDisplayIndex, currentDisplayIndex);
-                    if (!(event.ctrlKey || event.metaKey)) {
-                        selectedItemIds.forEach(id => document.getElementById(id)?.classList.remove('selected'));
-                        selectedItemIds.clear();
-                    }
-                    for (let i = start; i <= end; i++) {
-                        const gIdx = displayedImageDataIndices[i];
-                        if (allImageData[gIdx]) {
-                            addSelection(allImageData[gIdx].id);
-                        }
+                const start = Math.min(lastInteractedDisplayIndex, currentDisplayIndex);
+                const end = Math.max(lastInteractedDisplayIndex, currentDisplayIndex);
+
+                if (!(event.ctrlKey || event.metaKey)) { // If not holding Ctrl/Cmd, clear previous selection
+                    clearSelection();
+                }
+                for (let i = start; i <= end; i++) {
+                    const gIdx = displayedImageDataIndices[i];
+                    if (allImageData[gIdx] && !allImageData[gIdx].isTrashed) { // Only select non-trashed
+                        addSelection(allImageData[gIdx].id);
                     }
                 }
             }
         } else if (event.ctrlKey || event.metaKey) {
-            toggleSelection(itemId);
-            lastInteractedItemId = itemId;
-        } else {
+            if (!item.isTrashed) toggleSelection(itemId); // Only select non-trashed
+            lastInteractedItemId = item.isTrashed ? null : itemId;
+        } else { // Simple click
             const wasSelected = selectedItemIds.has(itemId);
             const wasOnlySelection = wasSelected && selectedItemIds.size === 1;
-            if (wasOnlySelection) {
+
+            if (wasOnlySelection) { // Clicked on the only selected item
                 selectedItemIds.delete(itemId);
                 document.getElementById(itemId)?.classList.remove('selected');
                 lastInteractedItemId = null;
+                // Do not open editor if deselecting
             } else {
                 clearSelection();
-                addSelection(itemId);
-                lastInteractedItemId = itemId;
-            }
-            if (isImageClick && selectedItemIds.has(itemId) && selectedItemIds.size === 1) {
-                openEditor(itemId);
+                if (!item.isTrashed) {
+                    addSelection(itemId);
+                    lastInteractedItemId = itemId;
+                    if (canOpenEditor) { // Open editor only if it's a fresh, single selection via image click
+                         openEditor(itemId);
+                    }
+                } else {
+                    lastInteractedItemId = null; // Cannot select trashed item
+                }
             }
         }
         updateBatchEditButtonState();
@@ -526,6 +563,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function toggleSelection(itemId) {
         const element = document.getElementById(itemId);
+        const item = allImageData[findIndexById(itemId)];
+        if (item && item.isTrashed) return; // Do not select trashed items
+
         if (selectedItemIds.has(itemId)) {
             selectedItemIds.delete(itemId);
             element?.classList.remove('selected');
@@ -537,6 +577,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function addSelection(itemId) {
         const element = document.getElementById(itemId);
+        const item = allImageData[findIndexById(itemId)];
+        if (item && item.isTrashed) return; // Do not select trashed items
+
         if (!selectedItemIds.has(itemId)) {
             selectedItemIds.add(itemId);
             element?.classList.add('selected');
@@ -558,7 +601,7 @@ document.addEventListener('DOMContentLoaded', () => {
         batchEditSelectionBtn.disabled = count === 0;
     }
 
-    function renderTagsForItem(tagsContainer, item) {
+    function renderTagsForItem(tagsContainer, item) { // item is the full data object
         tagsContainer.innerHTML = '';
         if (item.tags.length === 0) {
             tagsContainer.textContent = '(no tags)';
@@ -567,29 +610,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 const tagSpan = document.createElement('span');
                 tagSpan.classList.add('tag');
                 tagSpan.textContent = tag;
-                const deleteBtn = document.createElement('span');
-                deleteBtn.classList.add('tag-delete-btn');
-                deleteBtn.textContent = '×';
-                deleteBtn.title = `Remove tag "${tag}"`;
-                deleteBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    removeTagFromImage(item.id, tag);
-                });
-                tagSpan.appendChild(deleteBtn);
+
+                if (!item.isTrashed) { // Only add delete button for non-trashed items
+                    const deleteBtn = document.createElement('span');
+                    deleteBtn.classList.add('tag-delete-btn');
+                    deleteBtn.textContent = '×';
+                    deleteBtn.title = `Remove tag "${tag}"`;
+                    deleteBtn.addEventListener('click', (e) => {
+                        e.stopPropagation(); // Prevent grid item click
+                        removeTagFromImage(item.id, tag);
+                    });
+                    tagSpan.appendChild(deleteBtn);
+                }
                 tagsContainer.appendChild(tagSpan);
             });
         }
     }
 
     function updateDisplayedCount() {
-        displayedCountSpan.textContent = displayedImageDataIndices.length;
-        totalCountSpan.textContent = allImageData.length;
+        const activeItemsCount = getActiveItems().length;
+        displayedCountSpan.textContent = displayedImageDataIndices.length; // Number of items currently in the grid
+        totalCountSpan.textContent = activeItemsCount; // Total non-trashed items in the dataset
     }
 
-    function recalculateAllTagStats() {
+    function recalculateAllTagStats() { // Operates on active items
         tagFrequencies.clear();
         uniqueTags.clear();
-        allImageData.forEach(item => {
+        getActiveItems().forEach(item => {
             item.tags.forEach(tag => {
                 const t = tag.trim();
                 if (t) {
@@ -601,7 +648,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStatisticsDisplay();
     }
 
-    function updateTagStatsIncremental(addedTags, removedTags) {
+    function updateTagStatsIncremental(addedTags, removedTags) { // Assumes called for an active item
         const add = addedTags.map(t => t.trim()).filter(t => t);
         const rem = removedTags.map(t => t.trim()).filter(t => t);
         rem.forEach(tag => {
@@ -619,29 +666,37 @@ document.addEventListener('DOMContentLoaded', () => {
             tagFrequencies.set(tag, (tagFrequencies.get(tag) || 0) + 1);
             uniqueTags.add(tag);
         });
+        // No need to call updateStatisticsDisplay here, usually called by parent
     }
 
     function updateTagStats(addedTags, removedTags, isInitialLoad = false) {
-        if (isInitialLoad) {
+        // For initial load, we build up from scratch. For incremental, we adjust.
+        if (isInitialLoad) { // During dataset load, items are not yet trashed
             addedTags.map(t => t.trim()).filter(t => t).forEach(tag => {
                 tagFrequencies.set(tag, (tagFrequencies.get(tag) || 0) + 1);
                 uniqueTags.add(tag);
             });
-        } else {
+        } else { // Incremental update (e.g., after tag edit) - assumes item is active
             updateTagStatsIncremental(addedTags, removedTags);
         }
+        // updateStatisticsDisplay will be called by the caller (e.g., loadDataset, saveEditorChanges)
     }
 
+
     function updateStatisticsDisplay() {
-        statsTotalImages.textContent = allImageData.length;
-        statsUniqueTags.textContent = uniqueTags.size;
-        statsModifiedImages.textContent = allImageData.filter(item => item.modified).length;
+        const activeItems = getActiveItems();
+        statsTotalImages.textContent = activeItems.length;
+        statsUniqueTags.textContent = uniqueTags.size; // uniqueTags is already based on active items via recalculateAllTagStats
+        statsModifiedImages.textContent = activeItems.filter(item => item.modified).length;
+
         tagFrequencyList.innerHTML = '';
         const searchTerm = tagFrequencySearchInput.value.trim().toLowerCase();
+        // tagFrequencies should already be based on active items
         const filteredFrequencies = [...tagFrequencies.entries()].filter(([t]) => !searchTerm || t.toLowerCase().includes(searchTerm));
         const sortedTags = filteredFrequencies.sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]));
+
         if (sortedTags.length === 0) {
-            tagFrequencyList.innerHTML = `<div><span>${searchTerm ? 'No tags match search.' : 'No tags loaded.'}</span></div>`;
+            tagFrequencyList.innerHTML = `<div><span>${searchTerm ? 'No active tags match search.' : 'No active tags loaded.'}</span></div>`;
         } else {
             sortedTags.forEach(([tag, count]) => {
                 const div = document.createElement('div');
@@ -665,15 +720,30 @@ document.addEventListener('DOMContentLoaded', () => {
                 tagFrequencyList.appendChild(div);
             });
         }
+        updateDisplayedCount(); // Ensure grid header count is also up-to-date
     }
+
+    function updateSaveAllButtonState() {
+        const hasModifiedActiveItems = getActiveItems().some(item => item.modified);
+        saveAllBtn.disabled = !hasModifiedActiveItems;
+    }
+
+    function updateEmptyTrashButtonState() {
+        const trashedCount = allImageData.filter(item => item.isTrashed).length;
+        emptyTrashBtn.textContent = `Empty Trash (${trashedCount})`;
+        emptyTrashBtn.disabled = trashedCount === 0;
+    }
+
 
     function sortAndRender() {
         clearKeyboardFocus();
+        // Sort displayedImageDataIndices, which should already point to correct items from allImageData
         displayedImageDataIndices.sort((indexA, indexB) => {
             const itemA = allImageData[indexA];
             const itemB = allImageData[indexB];
             let comparison = 0;
-            if (!itemA || !itemB) return 0;
+            if (!itemA || !itemB) return 0; // Should not happen with valid indices
+
             switch (currentSortProperty) {
                 case 'filename':
                     comparison = (itemA.originalFullImageName || '').localeCompare(itemB.originalFullImageName || '');
@@ -717,39 +787,57 @@ document.addEventListener('DOMContentLoaded', () => {
         const excludeTerms = parseTags(excludeTagsInput.value);
         const searchMode = searchModeSelect.value;
         const filterMode = filterUntaggedSelect.value;
+
         updateStatus('Filtering...', true, true);
         requestAnimationFrame(() => {
-            displayedImageDataIndices = allImageData.map((_, i) => i).filter(index => {
+            // Determine the base pool of items to filter from
+            let baseItemsPoolIndices;
+            if (filterMode === 'trashed') {
+                baseItemsPoolIndices = allImageData.map((item, i) => item.isTrashed ? i : -1).filter(i => i !== -1);
+            } else {
+                baseItemsPoolIndices = allImageData.map((item, i) => !item.isTrashed ? i : -1).filter(i => i !== -1);
+            }
+
+            displayedImageDataIndices = baseItemsPoolIndices.filter(index => {
                 const item = allImageData[index];
-                if (!item) return false;
+                if (!item) return false; 
+
                 let include = true;
-                switch (filterMode) {
-                    case 'tagged':
-                        if (item.tags.length === 0) include = false;
-                        break;
-                    case 'untagged':
-                        if (item.tags.length > 0) include = false;
-                        break;
-                    case 'modified':
-                        if (!item.modified) include = false;
-                        break;
+                // Apply specific non-trash filters only if not in "trashed" mode
+                if (filterMode !== 'trashed') {
+                    switch (filterMode) {
+                        case 'tagged':
+                            if (item.tags.length === 0) include = false;
+                            break;
+                        case 'untagged':
+                            if (item.tags.length > 0) include = false;
+                            break;
+                        case 'modified':
+                            if (!item.modified) include = false;
+                            break;
+                        // 'all' (active) means no further filtering here based on these criteria
+                    }
                 }
                 if (!include) return false;
+
+                // Apply search term filters
                 if (searchTermsRaw.length > 0) {
                     const itemTagsLower = item.tags.map(t => t.toLowerCase());
                     if (searchMode === 'AND') {
                         include = searchTermsRaw.every(term => itemTagsLower.some(tag => tag.includes(term.toLowerCase())));
-                    } else {
+                    } else { // OR mode
                         include = searchTermsRaw.some(term => itemTagsLower.some(tag => tag.includes(term.toLowerCase())));
                     }
                 }
                 if (!include) return false;
+
+                // Apply exclude term filters
                 if (excludeTerms.length > 0) {
                     include = !excludeTerms.some(term => item.tags.includes(term));
                 }
                 return include;
             });
-            sortAndRender();
+            sortAndRender(); // This will render the filtered and sorted displayedImageDataIndices
         });
     }
 
@@ -758,7 +846,7 @@ document.addEventListener('DOMContentLoaded', () => {
         searchTagsInput.value = '';
         excludeTagsInput.value = '';
         searchModeSelect.value = 'AND';
-        filterUntaggedSelect.value = 'all';
+        filterUntaggedSelect.value = 'all'; // Default to 'all active'
         duplicateFilesOutput.innerHTML = '';
         orphanedMissingOutput.innerHTML = '';
         caseInconsistentOutput.innerHTML = '';
@@ -766,22 +854,39 @@ document.addEventListener('DOMContentLoaded', () => {
         sortPropertySelect.value = currentSortProperty;
         currentSortOrder = 'asc';
         sortOrderSelect.value = currentSortOrder;
-        displayedImageDataIndices = allImageData.map((_, i) => i);
+        
+        // Reset displayedImageDataIndices to all active items
+        displayedImageDataIndices = getActiveItems().map(item => allImageData.indexOf(item));
         sortAndRender();
     }
+
 
     function findIndexById(itemId) {
         return allImageData.findIndex(item => item.id === itemId);
     }
 
     function openEditor(itemId) {
-        const index = findIndexById(itemId);
+        const index = findIndexById(itemId); // index in allImageData
         if (index === -1) {
             updateStatus("Error: Item not found for single editor.");
             return;
         }
-        currentEditIndex = index;
         const item = allImageData[index];
+
+        if (item.isTrashed) {
+            editorStatus.textContent = "This item is in the trash. Restore it to edit tags.";
+            editorStatus.style.color = 'var(--status-color)';
+            editorTagsTextarea.disabled = true;
+            editorSaveBtn.disabled = true;
+            editorRemoveDupsBtn.disabled = true;
+        } else {
+            editorTagsTextarea.disabled = false;
+            editorSaveBtn.disabled = false;
+            editorRemoveDupsBtn.disabled = false;
+            editorStatus.textContent = '';
+        }
+
+        currentEditIndex = index;
         currentEditOriginalTagsString = joinTags(item.tags);
         editorImagePreview.src = item.imageUrl;
         if (editorImagePreview.classList.contains('zoomed')) {
@@ -797,7 +902,7 @@ document.addEventListener('DOMContentLoaded', () => {
         metadataHTML += `  |  Modified: ${new Date(item.lastModified).toLocaleDateString()}`;
         editorMetadataDisplay.innerHTML = metadataHTML;
         editorTagsTextarea.value = joinTags(item.tags);
-        editorStatus.textContent = '';
+        // editorStatus already handled above for trashed items
         editorModal.classList.remove('hidden');
         updateEditorNavButtonStates();
         hideSuggestions();
@@ -811,9 +916,13 @@ document.addEventListener('DOMContentLoaded', () => {
         currentEditIndex = -1;
         currentEditOriginalTagsString = '';
         editorMetadataDisplay.innerHTML = '';
+        // Restore focus to grid item if applicable
         if (keyboardFocusIndex !== -1 && displayedImageDataIndices.length > keyboardFocusIndex) {
-            const focusedItemId = allImageData[displayedImageDataIndices[keyboardFocusIndex]]?.id;
-            document.getElementById(focusedItemId)?.focus();
+            const globalFocusedIndex = displayedImageDataIndices[keyboardFocusIndex];
+            if (allImageData[globalFocusedIndex]) {
+                 const focusedItemId = allImageData[globalFocusedIndex].id;
+                 document.getElementById(focusedItemId)?.focus(); // Re-focus grid item
+            }
         }
         hideSuggestions();
     }
@@ -825,26 +934,37 @@ document.addEventListener('DOMContentLoaded', () => {
             return false;
         }
         const item = allImageData[currentEditIndex];
+        if (item.isTrashed) {
+            editorStatus.textContent = "Cannot save tags for a trashed item.";
+            editorStatus.style.color = 'var(--error-color)';
+            return false;
+        }
+
         const newTagsFromTextarea = parseTags(editorTagsTextarea.value);
         const newTagsStringFromTextarea = joinTags(newTagsFromTextarea);
+
         if (newTagsStringFromTextarea !== currentEditOriginalTagsString) {
+            const oldTagsForStatUpdate = parseTags(currentEditOriginalTagsString); // Tags before this edit session
+            
             item.tags = newTagsFromTextarea;
             item.modified = true;
-            saveAllBtn.disabled = false;
-            const oldTagsForStatUpdate = parseTags(currentEditOriginalTagsString);
+            
             const addedForStatUpdate = newTagsFromTextarea.filter(t => !oldTagsForStatUpdate.includes(t));
             const removedForStatUpdate = oldTagsForStatUpdate.filter(t => !newTagsFromTextarea.includes(t));
-            updateTagStatsIncremental(addedForStatUpdate, removedForStatUpdate);
-            recalculateAllTagStats();
+            
+            updateTagStatsIncremental(addedForStatUpdate, removedForStatUpdate); // Update stats based on delta
+            recalculateAllTagStats(); // Recalculate global unique tags and frequencies
+            
             const gridItem = document.getElementById(item.id);
             if (gridItem) {
                 gridItem.classList.add('modified');
                 const tagsDiv = gridItem.querySelector('.tags');
                 if (tagsDiv) renderTagsForItem(tagsDiv, item);
             }
-            editorStatus.textContent = 'Tags updated. Save changes.';
+            editorStatus.textContent = 'Tags updated. Remember to "Save All Changes".';
             editorStatus.style.color = 'var(--success-color)';
-            currentEditOriginalTagsString = newTagsStringFromTextarea;
+            currentEditOriginalTagsString = newTagsStringFromTextarea; // Update original for next comparison
+            updateSaveAllButtonState();
             return true;
         } else {
             editorStatus.textContent = 'No changes detected to save.';
@@ -854,7 +974,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function removeDuplicateTagsInEditor() {
-        if (currentEditIndex === -1 || !allImageData[currentEditIndex]) return;
+        if (currentEditIndex === -1 || !allImageData[currentEditIndex] || allImageData[currentEditIndex].isTrashed) return;
         const currentTags = parseTags(editorTagsTextarea.value);
         const unique = [...new Set(currentTags)];
         editorTagsTextarea.value = joinTags(unique);
@@ -872,14 +992,18 @@ document.addEventListener('DOMContentLoaded', () => {
         const index = findIndexById(itemId);
         if (index === -1) return;
         const item = allImageData[index];
+        if (item.isTrashed) return; // Cannot modify trashed items
+
         const oldLen = item.tags.length;
         const newTags = item.tags.filter(t => t !== tagToRemove);
+
         if (newTags.length < oldLen) {
             item.tags = newTags;
             item.modified = true;
-            saveAllBtn.disabled = false;
-            updateTagStatsIncremental([], [tagToRemove]);
-            recalculateAllTagStats();
+            updateSaveAllButtonState();
+            updateTagStatsIncremental([], [tagToRemove]); // Update stats
+            recalculateAllTagStats(); // Recalculate global unique tags and frequencies
+
             const gridItem = document.getElementById(item.id);
             if (gridItem) {
                 gridItem.classList.add('modified');
@@ -889,112 +1013,207 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function requestImageDeletion(itemId) {
-        const index = findIndexById(itemId);
-        if (index === -1) {
-            updateStatus("Error: Item not found.");
-            return;
-        }
-        const item = allImageData[index];
-        const deleteMsg = item.relativePath ? `Permanently DELETE "${item.relativePath}/${item.originalFullImageName}" and its tag file?` : `Permanently DELETE "${item.originalFullImageName}" and its tag file?`;
-        if (confirm(`${deleteMsg}\n\n*** WARNING: PERMANENT! ***`)) {
-            deleteImageFilesAndView(itemId);
-        } else {
-            updateStatus("Deletion cancelled.");
-        }
-    }
-    async function deleteImageFilesAndView(itemId) {
-        const index = findIndexById(itemId);
-        if (index === -1) return;
-        const item = allImageData[index];
-        const fullImagePath = item.relativePath ? `${item.relativePath}/${item.originalFullImageName}` : item.originalFullImageName;
-        let errorOccurred = false;
-        updateStatus(`Attempting to delete ${fullImagePath}...`, true);
-        try {
-            if (!datasetHandle || await datasetHandle.queryPermission({ mode: 'readwrite' }) !== 'granted' && await datasetHandle.requestPermission({ mode: 'readwrite' }) !== 'granted') {
-                updateStatus('Error: Permission denied.');
-                return;
-            }
-            let parentDirHandle = datasetHandle;
-            if (item.relativePath) {
-                try {
-                    const parts = item.relativePath.split('/');
-                    for (const p of parts) {
-                        if (p) parentDirHandle = await parentDirHandle.getDirectoryHandle(p, { create: false });
-                    }
-                } catch (e) {
-                    console.error(`Dir nav error:`, e);
-                    updateStatus(`Error finding dir "${item.relativePath}"`);
-                    errorOccurred = true;
-                    item.imageHandle = null;
-                    item.tagHandle = null;
-                }
-            }
-            if (item.imageHandle && !errorOccurred) {
-                const name = item.imageHandle.name; // Use the handle's name for exact match
-                try {
-                    await parentDirHandle.removeEntry(name);
-                    console.log(`Deleted image: ${fullImagePath}`);
-                    item.imageHandle = null;
-                } catch (e) {
-                    console.error(`Img delete error:`, e);
-                    updateStatus(`Error deleting image "${fullImagePath}"`);
-                    errorOccurred = true;
-                }
-            }
-            if (item.tagHandle && !errorOccurred) {
-                const name = item.tagHandle.name; // Use the handle's name
-                const fullTagPath = item.relativePath ? `${item.relativePath}/${name}` : name;
-                try {
-                    await parentDirHandle.removeEntry(name);
-                    console.log(`Deleted tag file for: ${fullTagPath}`);
-                    item.tagHandle = null;
-                } catch (e) {
-                    console.error(`Tag delete error:`, e);
-                    if (!errorOccurred) updateStatus(`Error deleting tag file "${fullTagPath}"`);
-                    errorOccurred = true;
-                }
-            }
-            document.getElementById(itemId)?.remove();
-            if (item.imageUrl) URL.revokeObjectURL(item.imageUrl);
-            if (selectedItemIds.has(itemId)) {
-                selectedItemIds.delete(itemId);
-                updateBatchEditButtonState();
-            }
-            if (lastInteractedItemId === itemId) lastInteractedItemId = null;
-            const originalGlobalIndexForDisplayed = displayedImageDataIndices.indexOf(index);
-            allImageData.splice(index, 1);
-            displayedImageDataIndices = displayedImageDataIndices.reduce((acc, dispIdx) => {
-                if (dispIdx < index) acc.push(dispIdx);
-                else if (dispIdx > index) acc.push(dispIdx - 1);
-                return acc;
-            }, []);
-            recalculateAllTagStats();
-            updateDisplayedCount();
-            if (!errorOccurred) updateStatus(`Deleted "${fullImagePath}" files. ${allImageData.length} images left.`);
-            else updateStatus(statusMessage.textContent + ` Removed from view despite errors.`);
-            if (keyboardFocusIndex === originalGlobalIndexForDisplayed && originalGlobalIndexForDisplayed !== -1) {
-                clearKeyboardFocus();
-            } else if (keyboardFocusIndex > originalGlobalIndexForDisplayed && originalGlobalIndexForDisplayed !== -1) {
-                setKeyboardFocus(keyboardFocusIndex - 1);
-            }
-            if (displayedImageDataIndices.length === 0 && allImageData.length > 0) {
-                resetFilters();
-            } else if (displayedImageDataIndices.length > 0) {
-                renderImageGrid(); // Rerender might not be strictly necessary but good for consistency
-            }
-        } catch (permError) {
-            console.error("Permission error:", permError);
-            updateStatus(`Perm error: ${permError.message}`);
-        } finally {
-            loadingIndicator.classList.add('hidden');
+    // --- Trash System Functions ---
+    function promptMoveToTrash(itemId) {
+        const item = allImageData[findIndexById(itemId)];
+        if (!item) return;
+        const msg = item.relativePath ? `Move "${item.relativePath}/${item.originalFullImageName}" to trash?` : `Move "${item.originalFullImageName}" to trash?`;
+        if (confirm(`${msg}\n\nItem can be restored or permanently deleted from the trash.`)) {
+            moveToTrash(itemId);
         }
     }
 
+    function moveToTrash(itemId) {
+        const index = findIndexById(itemId);
+        if (index === -1) return;
+        const item = allImageData[index];
+        if (item.isTrashed) return; // Already trashed
+
+        item.isTrashed = true;
+        item.modified = false; // Trashing is not a "tag modification" for save all button
+
+        // Update UI for the specific item
+        const gridItemElement = document.getElementById(item.id);
+        if (gridItemElement) {
+            gridItemElement.classList.add('trashed-item');
+            gridItemElement.classList.remove('modified'); // Visually remove modified if it was, as it's now just "trashed"
+            const actionBtn = gridItemElement.querySelector('.image-action-btn');
+            if (actionBtn) {
+                actionBtn.classList.remove('move-to-trash-btn');
+                actionBtn.classList.add('restore-btn');
+                actionBtn.textContent = '♻';
+                actionBtn.title = `Restore "${item.originalFullImageName}" from trash`;
+                actionBtn.replaceWith(actionBtn.cloneNode(true)); // Re-attach to clear old listeners
+                gridItemElement.querySelector('.restore-btn').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    restoreFromTrash(item.id);
+                });
+            }
+            const tagsDiv = gridItemElement.querySelector('.tags');
+            if (tagsDiv) renderTagsForItem(tagsDiv, item); // Re-render tags to remove delete buttons
+        }
+        
+        // If item was selected, deselect it as trashed items cannot be part of batch edits
+        if (selectedItemIds.has(item.id)) {
+            selectedItemIds.delete(item.id);
+            gridItemElement?.classList.remove('selected');
+            updateBatchEditButtonState();
+        }
+        if (lastInteractedItemId === item.id) lastInteractedItemId = null;
+
+        // Recalculate stats and update counts
+        recalculateAllTagStats(); // This will exclude the newly trashed item
+        updateEmptyTrashButtonState();
+        updateSaveAllButtonState(); // Ensure save button reflects actual tag modifications
+
+        // If current view is not "Only Trashed", the item might disappear. Re-filter.
+        if (filterUntaggedSelect.value !== 'trashed') {
+            filterAndSearch(); // Re-apply filters, which will hide the item if not showing trash
+        } else {
+             // If current view IS "Only Trashed", we still need to re-render the grid
+             // to show the item now correctly styled as trashed, or if sorting changed.
+            sortAndRender();
+        }
+        updateStatus(`Moved "${item.originalFullImageName}" to trash.`);
+    }
+
+    function restoreFromTrash(itemId) {
+        const index = findIndexById(itemId);
+        if (index === -1) return;
+        const item = allImageData[index];
+        if (!item.isTrashed) return; // Not in trash
+
+        item.isTrashed = false;
+        // item.modified remains as it was before trashing (if it was modified for tags)
+
+        const gridItemElement = document.getElementById(item.id);
+        if (gridItemElement) {
+            gridItemElement.classList.remove('trashed-item');
+            if(item.modified) gridItemElement.classList.add('modified'); // Re-add if it was modified
+
+            const actionBtn = gridItemElement.querySelector('.image-action-btn');
+            if (actionBtn) {
+                actionBtn.classList.remove('restore-btn');
+                actionBtn.classList.add('move-to-trash-btn');
+                actionBtn.textContent = '×';
+                const deleteTitle = item.relativePath ? `Move "${item.relativePath}/${item.originalFullImageName}" to trash` : `Move "${item.originalFullImageName}" to trash`;
+                actionBtn.title = deleteTitle;
+                actionBtn.replaceWith(actionBtn.cloneNode(true)); // Re-attach
+                gridItemElement.querySelector('.move-to-trash-btn').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    promptMoveToTrash(item.id);
+                });
+            }
+             const tagsDiv = gridItemElement.querySelector('.tags');
+            if (tagsDiv) renderTagsForItem(tagsDiv, item); // Re-render tags to add delete buttons
+        }
+
+        recalculateAllTagStats(); // Will now include this item
+        updateEmptyTrashButtonState();
+        updateSaveAllButtonState();
+
+        // If current view is "Only Trashed", the item will disappear. Re-filter.
+        if (filterUntaggedSelect.value === 'trashed') {
+            filterAndSearch();
+        } else {
+            // If current view is NOT "Only Trashed", we still need to re-render the grid
+            // to show the item now correctly styled as active, or if sorting changed.
+            sortAndRender();
+        }
+        updateStatus(`Restored "${item.originalFullImageName}" from trash.`);
+    }
+
+    async function permanentlyDeleteTrashedItems() {
+        const itemsToDelete = allImageData.filter(item => item.isTrashed);
+        if (itemsToDelete.length === 0) {
+            updateStatus("Trash is already empty.");
+            return;
+        }
+        if (!confirm(`Permanently delete ${itemsToDelete.length} item(s) from the trash? THIS CANNOT BE UNDONE.`)) {
+            updateStatus("Permanent deletion cancelled.");
+            return;
+        }
+
+        updateStatus(`Permanently deleting ${itemsToDelete.length} item(s)...`, true);
+        let deletedCount = 0;
+        let errorCount = 0;
+
+        try {
+            if (!datasetHandle || (await datasetHandle.queryPermission({ mode: 'readwrite' }) !== 'granted' &&
+                await datasetHandle.requestPermission({ mode: 'readwrite' }) !== 'granted')) {
+                updateStatus('Error: Write permission denied. Cannot delete files.');
+                return;
+            }
+
+            for (const item of itemsToDelete) {
+                let itemError = false;
+                // Delete image file
+                if (item.imageHandle) {
+                    try {
+                        let parentDirHandle = datasetHandle;
+                        if (item.relativePath) {
+                            const parts = item.relativePath.split('/');
+                            for (const p of parts) {
+                                if (p) parentDirHandle = await parentDirHandle.getDirectoryHandle(p, { create: false });
+                            }
+                        }
+                        await parentDirHandle.removeEntry(item.imageHandle.name);
+                    } catch (e) {
+                        console.error(`Error deleting image file ${item.originalFullImageName}:`, e);
+                        itemError = true;
+                    }
+                }
+                // Delete tag file
+                if (item.tagHandle) {
+                     try {
+                        let parentDirHandle = datasetHandle;
+                        if (item.relativePath) {
+                            const parts = item.relativePath.split('/');
+                            for (const p of parts) {
+                                if (p) parentDirHandle = await parentDirHandle.getDirectoryHandle(p, { create: false });
+                            }
+                        }
+                        await parentDirHandle.removeEntry(item.tagHandle.name);
+                    } catch (e) {
+                        console.error(`Error deleting tag file ${item.originalFullTagName}:`, e);
+                        // Don't set itemError to true if image already failed, to avoid double counting error
+                        if (!itemError) itemError = true;
+                    }
+                }
+                if (item.imageUrl) URL.revokeObjectURL(item.imageUrl);
+                if (itemError) errorCount++; else deletedCount++;
+            }
+        } catch (permError) {
+            updateStatus(`Permission error during deletion: ${permError.message}`);
+            // No full stop, try to update state as much as possible
+        } finally {
+            // Update allImageData by removing all items marked isTrashed, regardless of FS operation success
+            // This ensures they are gone from the UI's perspective.
+            const newAllImageData = allImageData.filter(item => !item.isTrashed);
+            //const actuallyRemovedCount = allImageData.length - newAllImageData.length; // Should match itemsToDelete.length
+            allImageData = newAllImageData;
+            
+            clearSelection(); // Clear any selections as items are gone
+            clearKeyboardFocus();
+
+            // Recalculate everything
+            recalculateAllTagStats();
+            updateEmptyTrashButtonState(); // Will go to 0
+            updateSaveAllButtonState();
+
+            // Refresh the grid based on current filters
+            filterAndSearch();
+
+            updateStatus(`Permanently deleted ${deletedCount} item(s). ${errorCount > 0 ? `${errorCount} failed (see console).` : ''} Trash emptied.`, false);
+        }
+    }
+
+
     // --- Bulk Operations (Standard) ---
     function performStandardBulkOperation(operation) {
-        if (!datasetHandle || allImageData.length === 0) {
-            updateStatus("Load dataset first.");
+        const activeItems = getActiveItems();
+        if (!datasetHandle || activeItems.length === 0) {
+            updateStatus("Load dataset and ensure there are active (non-trashed) images.");
             return;
         }
         let modCount = 0;
@@ -1002,50 +1221,43 @@ document.addEventListener('DOMContentLoaded', () => {
         let oldTag, newTag, toRemove, toAdd;
         let confirmNeeded = false;
         let desc = "";
+
         switch (operation) {
             case 'rename':
                 oldTag = renameOldTagInput.value.trim();
                 newTag = renameNewTagInput.value.trim();
                 if (!oldTag || !newTag || oldTag === newTag) {
-                    updateStatus("Invalid rename input.");
-                    return;
+                    updateStatus("Invalid rename input."); return;
                 }
                 desc = `Rename "${oldTag}" to "${newTag}"`;
                 break;
             case 'remove':
                 toRemove = removeTagNameInput.value.trim();
-                if (!toRemove) {
-                    updateStatus("Need tag to remove.");
-                    return;
-                }
-                desc = `Remove "${toRemove}"`;
-                confirmNeeded = true;
+                if (!toRemove) { updateStatus("Need tag to remove."); return; }
+                desc = `Remove "${toRemove}"`; confirmNeeded = true;
                 break;
             case 'add':
                 toAdd = parseTags(addTriggerWordsInput.value);
-                if (toAdd.length === 0) {
-                    updateStatus("Need tags to add.");
-                    return;
-                }
+                if (toAdd.length === 0) { updateStatus("Need tags to add."); return; }
                 desc = `Add tags "${joinTags(toAdd)}"`;
                 break;
             case 'removeDuplicates':
                 desc = `Remove duplicate tags from each file`;
                 break;
-            default:
-                updateStatus("Unknown standard bulk op.");
-                return;
+            default: updateStatus("Unknown standard bulk op."); return;
         }
-        if (confirmNeeded && !confirm(`Bulk action on ALL images?\n\n${desc}`)) {
-            updateStatus("Cancelled.");
-            return;
+
+        if (confirmNeeded && !confirm(`Bulk action on ALL ${activeItems.length} active images?\n\n${desc}`)) {
+            updateStatus("Cancelled."); return;
         }
-        updateStatus(`${desc}...`, true);
+
+        updateStatus(`${desc} on active images...`, true);
         let statsChanged = false;
-        allImageData.forEach((item) => {
+        activeItems.forEach((item) => { // Iterate only over active items
             let origTagsString = joinTags(item.tags); 
             let currentTagsArray = [...item.tags];
             let itemChanged = false;
+
             switch (operation) {
                 case 'rename':
                     if (currentTagsArray.includes(oldTag)) {
@@ -1061,7 +1273,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'add':
                     const uniqueTagsToAdd = toAdd.filter(t => !currentTagsArray.includes(t));
                     if (uniqueTagsToAdd.length > 0) {
-                        currentTagsArray = [...uniqueTagsToAdd, ...currentTagsArray];
+                        currentTagsArray = [...uniqueTagsToAdd, ...currentTagsArray]; // Add to beginning
                         itemChanged = true;
                     }
                     break;
@@ -1073,7 +1285,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     break;
             }
-            if (itemChanged && joinTags(currentTagsArray) === origTagsString && operation !== 'removeDuplicates') {
+            // Check if tags actually changed content-wise, not just order for non-duplicate ops
+            if (itemChanged && operation !== 'removeDuplicates' && joinTags(currentTagsArray.slice().sort()) === joinTags(parseTags(origTagsString).slice().sort())) {
                 itemChanged = false; 
             }
 
@@ -1085,39 +1298,39 @@ document.addEventListener('DOMContentLoaded', () => {
                 statsChanged = true;
             }
         });
+
         if (modCount > 0) {
-            saveAllBtn.disabled = false;
+            updateSaveAllButtonState();
             affectedIds.forEach(id => {
                 const gridItem = document.getElementById(id);
-                const itemData = allImageData.find(i => i.id === id);
+                const itemData = allImageData.find(i => i.id === id); // Get from allImageData for rendering
                 if (gridItem && itemData) {
                     gridItem.classList.add('modified');
                     const tagsDiv = gridItem.querySelector('.tags');
                     if (tagsDiv) renderTagsForItem(tagsDiv, itemData);
                 }
             });
-            if (statsChanged) recalculateAllTagStats();
-            updateStatus(`${modCount} items affected by "${desc}". Save changes.`, false);
+            if (statsChanged) recalculateAllTagStats(); // Recalculate based on all active items
+            updateStatus(`${modCount} active items affected by "${desc}". Save changes.`, false);
         } else {
-            updateStatus(`Bulk op "${desc}" complete. No changes.`, false);
+            updateStatus(`Bulk op "${desc}" complete. No changes to active items.`, false);
         }
-        if (operation === 'rename') {
-            renameOldTagInput.value = '';
-            renameNewTagInput.value = '';
-        }
+        // Clear inputs
+        if (operation === 'rename') { renameOldTagInput.value = ''; renameNewTagInput.value = ''; }
         if (operation === 'remove') removeTagNameInput.value = '';
         if (operation === 'add') addTriggerWordsInput.value = '';
     }
 
-    // --- UTILITY FUNCTIONS ---
+    // --- UTILITY FUNCTIONS (operate on active items by default) ---
     function findDuplicateTagFiles() {
-        if (allImageData.length < 2) {
-            duplicateFilesOutput.innerHTML = '<p>Need at least 2 files to compare.</p>';
+        const activeItems = getActiveItems();
+        if (activeItems.length < 2) {
+            duplicateFilesOutput.innerHTML = '<p>Need at least 2 active files to compare.</p>';
             return;
         }
-        updateStatus('Finding files with identical tags...', true);
+        updateStatus('Finding files with identical tags (among active files)...', true);
         const tagStringToFilesMap = new Map();
-        allImageData.forEach(item => {
+        activeItems.forEach(item => {
             const tagString = joinTags(item.tags.slice().sort());
             const displayPath = item.relativePath ? `${item.relativePath}/${item.originalFullImageName}` : item.originalFullImageName;
             if (!tagStringToFilesMap.has(tagString)) {
@@ -1128,17 +1341,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const duplicateSets = [];
         for (const [tagStr, files] of tagStringToFilesMap.entries()) {
             if (files.length > 1) {
-                duplicateSets.push({
-                    tags: tagStr,
-                    files: files.sort()
-                });
+                duplicateSets.push({ tags: tagStr, files: files.sort() });
             }
         }
         duplicateSets.sort((a, b) => a.tags.localeCompare(b.tags));
         duplicateFilesOutput.innerHTML = '';
         if (duplicateSets.length > 0) {
             const summaryP = document.createElement('p');
-            summaryP.textContent = `Found ${duplicateSets.length} set(s) of files with identical tags:`;
+            summaryP.textContent = `Found ${duplicateSets.length} set(s) of active files with identical tags:`;
             duplicateFilesOutput.appendChild(summaryP);
             duplicateSets.forEach(dupSet => {
                 const p = document.createElement('p');
@@ -1152,328 +1362,283 @@ document.addEventListener('DOMContentLoaded', () => {
                 duplicateFilesOutput.appendChild(p);
                 duplicateFilesOutput.appendChild(ul);
             });
-            updateStatus(`Found ${duplicateSets.length} duplicate set(s).`, false);
+            updateStatus(`Found ${duplicateSets.length} duplicate set(s) among active files.`, false);
         } else {
-            duplicateFilesOutput.innerHTML = '<p>No files found with identical tags.</p>';
-            updateStatus('No duplicate tag sets found.', false);
+            duplicateFilesOutput.innerHTML = '<p>No active files found with identical tags.</p>';
+            updateStatus('No duplicate tag sets found among active files.', false);
         }
     }
 
-    async function findOrphanedAndMissingTagFiles() {
+    async function findOrphanedAndMissingTagFiles() { // This checks the entire filesystem entries vs allImageData
         if (!datasetHandle) {
-            orphanedMissingOutput.innerHTML = '<p>Load dataset first.</p>';
-            return;
+            orphanedMissingOutput.innerHTML = '<p>Load dataset first.</p>'; return;
         }
         updateStatus('Checking for orphaned/missing tag files...', true);
-        const orphanedTagFiles = [];
-        const imagesMissingTagFiles = [];
-        const allImageBaseNames = new Set(); // Stores lowercased base names of images from allImageData
-        const allTagFileBaseNames = new Set(); // Stores lowercased base names of tag files from allImageData
+        const orphanedTagFiles = []; // Tag files on disk with no corresponding image in allImageData
+        const imagesMissingTagFiles = []; // Images in allImageData that don't have a tagHandle
+        const allLoadedImageBasePaths = new Set(); // Stores base_path/image_name (lowercase) for all images in allImageData
+        const allLoadedTagBasePaths = new Set();   // Stores base_path/tag_name (lowercase) for all tags in allImageData
 
-        // Populate sets from allImageData (our primary source of truth for "managed" pairs)
         allImageData.forEach(item => {
-            const imageBase = item.imageName.toLowerCase(); // item.imageName is base name
-            const itemFullPath = item.relativePath ? `${item.relativePath}/${imageBase}` : imageBase;
-            allImageBaseNames.add(itemFullPath);
-
+            const imgBase = item.imageName.toLowerCase();
+            const imgFullPathKey = item.relativePath ? `${item.relativePath}/${imgBase}` : imgBase;
+            allLoadedImageBasePaths.add(imgFullPathKey);
             if (item.tagHandle) {
-                 // item.originalFullTagName will be like "name.txt", need base name
                 const tagBase = item.originalFullTagName.substring(0, item.originalFullTagName.lastIndexOf('.')).toLowerCase();
-                const tagFullPath = item.relativePath ? `${item.relativePath}/${tagBase}` : tagBase;
-                allTagFileBaseNames.add(tagFullPath);
+                const tagFullPathKey = item.relativePath ? `${item.relativePath}/${tagBase}` : tagBase;
+                allLoadedTagBasePaths.add(tagFullPathKey);
+            } else if (!item.isTrashed) { // If it's an active image and has no tagHandle, it's missing a tag file
+                 imagesMissingTagFiles.push(item.relativePath ? `${item.relativePath}/${item.originalFullImageName}` : item.originalFullImageName);
             }
         });
         
-        // Iterate through all known file system entries
-        for (const [fullPath, entryInfo] of allFileSystemEntries.entries()) {
+        for (const [fullPathOnDisk, entryInfo] of allFileSystemEntries.entries()) {
             if (entryInfo.kind !== 'file') continue;
 
             const lowerCaseName = entryInfo.name.toLowerCase();
             const ext = lowerCaseName.substring(lowerCaseName.lastIndexOf('.'));
             const baseName = lowerCaseName.substring(0, lowerCaseName.lastIndexOf('.'));
-            const pathParts = fullPath.split('/');
-            pathParts.pop(); // remove filename
+            const pathParts = fullPathOnDisk.split('/'); pathParts.pop(); 
             const relativePath = pathParts.join('/');
-            const mapKey = relativePath ? `${relativePath}/${baseName}` : baseName;
+            const diskFileKey = relativePath ? `${relativePath}/${baseName}` : baseName;
 
-            if (IMAGE_EXTENSIONS.includes(ext)) {
-                // This is an image file according to file system.
-                // Does it have a corresponding tag file in allTagFileBaseNames?
-                if (!allTagFileBaseNames.has(mapKey)) {
-                     // Also check if it's even in our allImageData. If not, it's an image we didn't load/pair.
-                    let foundInAllImageData = false;
-                    for(const imgData of allImageData){
-                        const imgDataBase = imgData.imageName.toLowerCase();
-                        const imgDataPath = imgData.relativePath ? `${imgData.relativePath}/${imgDataBase}` : imgDataBase;
-                        if(imgDataPath === mapKey){
-                            foundInAllImageData = true;
-                            break;
-                        }
-                    }
-                    if(foundInAllImageData){ // Only report if it's an image we manage
-                        imagesMissingTagFiles.push(fullPath);
-                    }
-                }
-            } else if (ext === TAG_EXTENSION) {
-                // This is a tag file according to file system.
-                // Does it have a corresponding image in allImageBaseNames?
-                if (!allImageBaseNames.has(mapKey)) {
-                    orphanedTagFiles.push(fullPath);
+            if (ext === TAG_EXTENSION) { // Found a .txt file on disk
+                if (!allLoadedImageBasePaths.has(diskFileKey)) { // No corresponding image loaded in our app
+                    orphanedTagFiles.push(fullPathOnDisk);
                 }
             }
         }
 
-
         orphanedMissingOutput.innerHTML = '';
         let foundAny = false;
-
         if (imagesMissingTagFiles.length > 0) {
             foundAny = true;
             const p = document.createElement('p');
-            p.textContent = `Images missing tag files (${imagesMissingTagFiles.length}):`;
+            p.textContent = `Active images missing tag files (${imagesMissingTagFiles.length}):`;
             orphanedMissingOutput.appendChild(p);
             const ul = document.createElement('ul');
             imagesMissingTagFiles.sort().forEach(filePath => {
-                const li = document.createElement('li');
-                li.textContent = escapeHtml(filePath);
-                ul.appendChild(li);
+                const li = document.createElement('li'); li.textContent = escapeHtml(filePath); ul.appendChild(li);
             });
             orphanedMissingOutput.appendChild(ul);
         }
-
         if (orphanedTagFiles.length > 0) {
             foundAny = true;
             const p = document.createElement('p');
-            p.textContent = `Orphaned tag files (no matching image) (${orphanedTagFiles.length}):`;
+            p.textContent = `Orphaned tag files on disk (no matching image loaded) (${orphanedTagFiles.length}):`;
             orphanedMissingOutput.appendChild(p);
             const ul = document.createElement('ul');
             orphanedTagFiles.sort().forEach(filePath => {
-                const li = document.createElement('li');
-                li.textContent = escapeHtml(filePath);
-                ul.appendChild(li);
+                const li = document.createElement('li'); li.textContent = escapeHtml(filePath); ul.appendChild(li);
             });
             orphanedMissingOutput.appendChild(ul);
         }
-
         if (!foundAny) {
-            orphanedMissingOutput.innerHTML = '<p>No orphaned or missing tag files found.</p>';
+            orphanedMissingOutput.innerHTML = '<p>No orphaned or missing tag files found according to current data load.</p>';
         }
         updateStatus('Orphaned/missing tag file check complete.', false);
     }
 
-    function findCaseInconsistentTags() {
+    function findCaseInconsistentTags() { // Uses uniqueTags, which is based on active items
         if (uniqueTags.size < 2) {
-            caseInconsistentOutput.innerHTML = '<p>Not enough unique tags to compare.</p>';
+            caseInconsistentOutput.innerHTML = '<p>Not enough unique tags from active items to compare.</p>';
             return;
         }
-        updateStatus('Finding case-inconsistent tags...', true);
-        const tagMap = new Map(); // lowercase_tag -> [OriginalCaseTag1, OriginalCaseTag2]
+        updateStatus('Finding case-inconsistent tags (among active items)...', true);
+        const tagMap = new Map(); 
         uniqueTags.forEach(tag => {
             const lower = tag.toLowerCase();
-            if (!tagMap.has(lower)) {
-                tagMap.set(lower, []);
-            }
+            if (!tagMap.has(lower)) tagMap.set(lower, []);
             tagMap.get(lower).push(tag);
         });
-
         const inconsistentGroups = [];
         for (const [lower, originals] of tagMap.entries()) {
             if (originals.length > 1) {
-                 // Further check: ensure there's actually a case difference
                 const uniqueOriginals = new Set(originals);
-                if (uniqueOriginals.size > 1) { // If "tag", "tag" was present, Set makes it 1
+                if (uniqueOriginals.size > 1) { 
                     inconsistentGroups.push({ lower, originals: [...uniqueOriginals].sort() });
                 }
             }
         }
         inconsistentGroups.sort((a,b) => a.lower.localeCompare(b.lower));
-
         caseInconsistentOutput.innerHTML = '';
         if (inconsistentGroups.length > 0) {
             const summaryP = document.createElement('p');
-            summaryP.textContent = `Found ${inconsistentGroups.length} group(s) of case-inconsistent tags:`;
+            summaryP.textContent = `Found ${inconsistentGroups.length} group(s) of case-inconsistent tags (from active items):`;
             caseInconsistentOutput.appendChild(summaryP);
             inconsistentGroups.forEach(group => {
-                const div = document.createElement('div');
-                div.classList.add('tag-group');
+                const div = document.createElement('div'); div.classList.add('tag-group');
                 const strong = document.createElement('strong');
-                strong.textContent = `Base: "${escapeHtml(group.lower)}" - Variants:`;
-                div.appendChild(strong);
+                strong.textContent = `Base: "${escapeHtml(group.lower)}" - Variants:`; div.appendChild(strong);
                 const ul = document.createElement('ul');
                 group.originals.forEach(originalTag => {
-                    const li = document.createElement('li');
-                    li.textContent = escapeHtml(originalTag);
-                    ul.appendChild(li);
+                    const li = document.createElement('li'); li.textContent = escapeHtml(originalTag); ul.appendChild(li);
                 });
-                div.appendChild(ul);
-                caseInconsistentOutput.appendChild(div);
+                div.appendChild(ul); caseInconsistentOutput.appendChild(div);
             });
-            updateStatus(`Found ${inconsistentGroups.length} case-inconsistent tag group(s).`, false);
+            updateStatus(`Found ${inconsistentGroups.length} case-inconsistent tag group(s) from active items.`, false);
         } else {
-            caseInconsistentOutput.innerHTML = '<p>No case-inconsistent tags found.</p>';
-            updateStatus('No case-inconsistent tags found.', false);
+            caseInconsistentOutput.innerHTML = '<p>No case-inconsistent tags found among active items.</p>';
+            updateStatus('No case-inconsistent tags found among active items.', false);
         }
     }
 
-    function exportUniqueTagList() {
+    function exportUniqueTagList() { // Uses uniqueTags, based on active items
         if (uniqueTags.size === 0) {
-            updateStatus("No unique tags to export.");
-            return;
+            updateStatus("No unique tags from active items to export."); return;
         }
         const tagArray = [...uniqueTags].sort();
         const fileContent = tagArray.join('\n');
         const blob = new Blob([fileContent], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = 'unique_tags_export.txt';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        updateStatus(`Exported ${tagArray.length} unique tags.`);
+        a.href = url; a.download = 'unique_tags_export.txt';
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a); URL.revokeObjectURL(url);
+        updateStatus(`Exported ${tagArray.length} unique tags from active items.`);
     }
 
 
-    async function saveAllChanges() {
+    async function saveAllChanges() { // Saves tag modifications for active items
         if (!datasetHandle) {
-            updateStatus("No dataset loaded.");
+            updateStatus("No dataset loaded."); return;
+        }
+        const itemsToSave = getActiveItems().filter(item => item.modified);
+        if (itemsToSave.length === 0) {
+            updateStatus("No tag modifications on active items to save.");
+            updateSaveAllButtonState(); // Should disable it
             return;
         }
-        const itemsToSave = allImageData.filter(item => item.modified);
-        const deletionsOccurred = allImageData.length < initialTotalCount;
-        if (itemsToSave.length === 0 && !deletionsOccurred) {
-            updateStatus("No changes (modifications or deletions) to save.");
-            saveAllBtn.disabled = true;
+        let savedCount = 0, errorCount = 0;
+        updateStatus(`Saving ${itemsToSave.length} modified tag file(s) for active items...`, true);
+        try {
+            if (await datasetHandle.queryPermission({ mode: 'readwrite' }) !== 'granted' &&
+                await datasetHandle.requestPermission({ mode: 'readwrite' }) !== 'granted') {
+                updateStatus('Error: Write permission denied. Cannot save tags.');
+                return; // Do not disable save button here, user might retry
+            }
+        } catch (permError) {
+            updateStatus(`Error requesting permission: ${permError.message}`);
             return;
         }
-        let savedCount = 0,
-            errorCount = 0;
-        let finalMessage = "";
-        if (itemsToSave.length > 0) {
-            updateStatus(`Saving ${itemsToSave.length} modified tag file(s)...`, true);
+
+        for (const item of itemsToSave) { // item is already confirmed active and modified
+            const newTagString = joinTags(item.tags);
+            const tagFileName = item.originalFullTagName || `${item.imageName}${TAG_EXTENSION}`;
+            const fullLogPath = item.relativePath ? `${item.relativePath}/${tagFileName}` : tagFileName;
             try {
-                if (await datasetHandle.queryPermission({ mode: 'readwrite' }) !== 'granted') {
-                    if (await datasetHandle.requestPermission({ mode: 'readwrite' }) !== 'granted') {
-                        updateStatus('Error: Write permission denied. Cannot save tags.');
-                        saveAllBtn.disabled = false;
-                        return;
-                    }
-                }
-            } catch (permError) {
-                updateStatus(`Error requesting permission: ${permError.message}`);
-                saveAllBtn.disabled = false;
-                return;
-            }
-            for (const item of itemsToSave) {
-                const newTagString = joinTags(item.tags);
-                const tagFileName = item.originalFullTagName || `${item.imageName}${TAG_EXTENSION}`; // Use existing if known, else derive
-                const fullLogPath = item.relativePath ? `${item.relativePath}/${tagFileName}` : tagFileName;
-                try {
-                    let tagHandle = item.tagHandle;
-                    if (!tagHandle) {
-                        try {
-                            let parentDirHandle = datasetHandle;
-                            if (item.relativePath) {
-                                const pathParts = item.relativePath.split('/');
-                                for (const part of pathParts) {
-                                    if (part) {
-                                        parentDirHandle = await parentDirHandle.getDirectoryHandle(part, { create: false });
-                                    }
-                                }
+                let tagHandle = item.tagHandle;
+                if (!tagHandle) { // Need to create the tag file
+                    try {
+                        let parentDirHandle = datasetHandle;
+                        if (item.relativePath) {
+                            const pathParts = item.relativePath.split('/');
+                            for (const part of pathParts) {
+                                if (part) parentDirHandle = await parentDirHandle.getDirectoryHandle(part, { create: false });
                             }
-                            tagHandle = await parentDirHandle.getFileHandle(tagFileName, { create: true });
-                            item.tagHandle = tagHandle;
-                            item.originalFullTagName = tagFileName; // Update if we just created it
-                        } catch (handleError) {
-                            console.error(`Error getting/creating tag file handle for ${fullLogPath}:`, handleError);
-                            errorCount++;
-                            item.modified = true;
-                            continue;
                         }
+                        tagHandle = await parentDirHandle.getFileHandle(tagFileName, { create: true });
+                        item.tagHandle = tagHandle;
+                        item.originalFullTagName = tagFileName;
+                    } catch (handleError) {
+                        console.error(`Error getting/creating tag file handle for ${fullLogPath}:`, handleError);
+                        errorCount++; item.modified = true; // Keep modified true on error
+                        continue;
                     }
-                    const writable = await tagHandle.createWritable();
-                    await writable.write(newTagString);
-                    await writable.close();
-                    item.originalTags = newTagString;
-                    item.modified = false;
-                    savedCount++;
-                    document.getElementById(item.id)?.classList.remove('modified');
-                } catch (writeError) {
-                    console.error(`Error saving file ${fullLogPath}:`, writeError);
-                    errorCount++;
-                    item.modified = true;
                 }
+                const writable = await tagHandle.createWritable();
+                await writable.write(newTagString);
+                await writable.close();
+                item.originalTags = newTagString; // Update original tags baseline
+                item.modified = false;
+                savedCount++;
+                document.getElementById(item.id)?.classList.remove('modified');
+            } catch (writeError) {
+                console.error(`Error saving file ${fullLogPath}:`, writeError);
+                errorCount++; item.modified = true; // Keep modified true on error
             }
-            finalMessage = `Saved ${savedCount} tag file(s).`;
-            if (errorCount > 0) {
-                finalMessage += ` Failed to save ${errorCount}. Check console.`;
-            }
-        } else {
-            finalMessage = "No tag modifications to save.";
         }
-        if (deletionsOccurred) {
-            finalMessage += " (Image file deletions are performed immediately).";
-            initialTotalCount = allImageData.length;
-        }
-        const stillModified = allImageData.some(item => item.modified);
-        saveAllBtn.disabled = !stillModified && !(allImageData.length < initialTotalCount);
-        recalculateAllTagStats();
+        let finalMessage = `Saved ${savedCount} tag file(s).`;
+        if (errorCount > 0) finalMessage += ` Failed to save ${errorCount}. Check console.`;
+        
+        updateSaveAllButtonState(); // Will disable if all modified items were saved
+        recalculateAllTagStats(); // Stats might change if tags were consolidated etc.
         updateStatus(finalMessage, false);
     }
 
-    function navigateEditor(direction) {
+    function navigateEditor(direction) { // Operates on displayedImageDataIndices
         if (currentEditIndex === -1 || displayedImageDataIndices.length <= 1) return;
-        let currentItemGlobalIndex = currentEditIndex;
-        let currentItemDisplayIndex = -1;
-        for (let i = 0; i < displayedImageDataIndices.length; i++) {
-            if (displayedImageDataIndices[i] === currentItemGlobalIndex) {
-                currentItemDisplayIndex = i;
+
+        const currentGlobalIndex = currentEditIndex; // This is an index in allImageData
+        let currentDisplayIndexOfEditedItem = -1;
+        for(let i=0; i < displayedImageDataIndices.length; i++){
+            if(displayedImageDataIndices[i] === currentGlobalIndex){
+                currentDisplayIndexOfEditedItem = i;
                 break;
             }
         }
-        if (currentItemDisplayIndex === -1) {
-            console.warn("Current edited item not found for nav.");
-            return;
+        
+        if(currentDisplayIndexOfEditedItem === -1) {
+             // Current edited item is not in the displayed list (e.g., filtered out after opening)
+             // Try to find the closest visible item or just close editor.
+             console.warn("Edited item not in current display for navigation. Closing editor.");
+             closeEditor();
+             return;
         }
+
         let nextItemDisplayIndex;
         if (direction === 'next') {
-            nextItemDisplayIndex = (currentItemDisplayIndex + 1) % displayedImageDataIndices.length;
-        } else {
-            nextItemDisplayIndex = (currentItemDisplayIndex - 1 + displayedImageDataIndices.length) % displayedImageDataIndices.length;
+            nextItemDisplayIndex = (currentDisplayIndexOfEditedItem + 1) % displayedImageDataIndices.length;
+        } else { // previous
+            nextItemDisplayIndex = (currentDisplayIndexOfEditedItem - 1 + displayedImageDataIndices.length) % displayedImageDataIndices.length;
         }
-        if (editorTagsTextarea.value !== currentEditOriginalTagsString) {
-            saveEditorChanges();
+        
+        // Save current editor changes if any, before navigating
+        const itemBeingEdited = allImageData[currentGlobalIndex];
+        if (!itemBeingEdited.isTrashed && editorTagsTextarea.value !== currentEditOriginalTagsString) {
+            saveEditorChanges(); // This also updates currentEditOriginalTagsString if successful
         }
-        const nextItemGlobalIndex = displayedImageDataIndices[nextItemDisplayIndex];
-        if (allImageData[nextItemGlobalIndex]) {
-            openEditor(allImageData[nextItemGlobalIndex].id);
+
+        const nextGlobalIndexToOpen = displayedImageDataIndices[nextItemDisplayIndex];
+        if (allImageData[nextGlobalIndexToOpen]) {
+            openEditor(allImageData[nextGlobalIndexToOpen].id);
         }
     }
 
     function updateEditorNavButtonStates() {
-        if (displayedImageDataIndices.length <= 1) {
-            editorPrevBtn.disabled = true;
-            editorNextBtn.disabled = true;
-        } else {
-            editorPrevBtn.disabled = false;
-            editorNextBtn.disabled = false;
-        }
+        // Nav buttons are disabled if only one item is displayed OR if the current item is trashed (no nav from trashed)
+        const currentItem = (currentEditIndex !== -1) ? allImageData[currentEditIndex] : null;
+        const disableNav = displayedImageDataIndices.length <= 1 || (currentItem && currentItem.isTrashed);
+
+        editorPrevBtn.disabled = disableNav;
+        editorNextBtn.disabled = disableNav;
     }
+
 
     function showSuggestions(inputElement) {
         suggestionInputTarget = inputElement;
         const value = inputElement.value;
         const lastCommaIndex = value.lastIndexOf(',');
         const currentTagFragment = (lastCommaIndex === -1 ? value : value.substring(lastCommaIndex + 1)).trimStart();
-        if (currentTagFragment.length === 0 && !value.endsWith(',')) {
+
+        if (currentTagFragment.length === 0 && !value.endsWith(',')) { // Only hide if no fragment AND not ending with comma
             hideSuggestions();
             return;
         }
-        const existingTagsInInput = parseTags(value.substring(0, lastCommaIndex + 1));
-        currentSuggestions = [...uniqueTags].filter(tag => tag.toLowerCase().includes(currentTagFragment.toLowerCase()) && !existingTagsInInput.includes(tag)).slice(0, 10);
+
+        const existingTagsInInput = parseTags(value.substring(0, lastCommaIndex + 1)); // Tags before current fragment
+        
+        // Suggestions from uniqueTags (which are based on active items)
+        currentSuggestions = [...uniqueTags] 
+            .filter(tag => 
+                tag.toLowerCase().includes(currentTagFragment.toLowerCase()) && 
+                !existingTagsInInput.includes(tag)
+            )
+            .sort((a,b) => a.localeCompare(b)) // Alphabetical sort
+            .slice(0, 10); // Limit to 10 suggestions
+
         if (currentSuggestions.length > 0) {
-            editorTagSuggestionsBox.innerHTML = '';
+            editorTagSuggestionsBox.innerHTML = ''; // Clear previous
             const ul = document.createElement('ul');
             currentSuggestions.forEach((suggestion, index) => {
                 const li = document.createElement('li');
@@ -1486,7 +1651,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             editorTagSuggestionsBox.appendChild(ul);
             editorTagSuggestionsBox.classList.remove('hidden');
-            activeSuggestionIndex = -1;
+            activeSuggestionIndex = -1; // Reset active suggestion
         } else {
             hideSuggestions();
         }
@@ -1505,13 +1670,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const value = suggestionInputTarget.value;
         const lastCommaIndex = value.lastIndexOf(',');
         const beforeFragment = lastCommaIndex === -1 ? '' : value.substring(0, lastCommaIndex + 1).trimEnd() + (lastCommaIndex !== -1 ? ' ' : '');
+        
         suggestionInputTarget.value = `${beforeFragment}${suggestionText}, `;
         hideSuggestions();
         suggestionInputTarget.focus();
+        // Move cursor to end
         suggestionInputTarget.selectionStart = suggestionInputTarget.selectionEnd = suggestionInputTarget.value.length;
     }
 
-    function updateActiveSuggestion(newIndex) {
+    function updateActiveSuggestion(newIndex) { // newIndex is for currentSuggestions array
         const items = editorTagSuggestionsBox.querySelectorAll('li');
         if (activeSuggestionIndex !== -1 && items[activeSuggestionIndex]) {
             items[activeSuggestionIndex].classList.remove('active-suggestion');
@@ -1519,9 +1686,7 @@ document.addEventListener('DOMContentLoaded', () => {
         activeSuggestionIndex = newIndex;
         if (activeSuggestionIndex !== -1 && items[activeSuggestionIndex]) {
             items[activeSuggestionIndex].classList.add('active-suggestion');
-            items[activeSuggestionIndex].scrollIntoView({
-                block: 'nearest'
-            });
+            items[activeSuggestionIndex].scrollIntoView({ block: 'nearest' });
         }
     }
 
@@ -1530,56 +1695,63 @@ document.addEventListener('DOMContentLoaded', () => {
             updateStatus("No items selected for batch editing.");
             return;
         }
+        // Ensure all selected items are active (not trashed)
+        const activeSelectedItemsData = [];
+        selectedItemIds.forEach(id => {
+            const item = getActiveItemById(id); // Use helper that checks isTrashed
+            if (item) activeSelectedItemsData.push(item);
+        });
+
+        if (activeSelectedItemsData.length !== selectedItemIds.size) {
+            updateStatus("Some selected items are trashed and cannot be batch edited. Deselect them or restore them.", false);
+            // Optionally, auto-deselect trashed items here and proceed if any active ones remain
+            // For now, just block if discrepancy.
+            return;
+        }
+        if (activeSelectedItemsData.length === 0) {
+            updateStatus("No active items selected for batch editing.");
+            return;
+        }
+
+
         batchEditorModal.classList.remove('hidden');
-        batchEditorSelectedCount.textContent = selectedItemIds.size;
+        batchEditorSelectedCount.textContent = activeSelectedItemsData.length;
         batchEditorAddTagsInput.value = '';
         batchEditorRemoveTagsInput.value = '';
         batchEditorStatus.textContent = '';
-        const selectedItemsData = [];
-        selectedItemIds.forEach(id => {
-            const index = findIndexById(id);
-            if (index !== -1) selectedItemsData.push(allImageData[index]);
-        });
-        if (selectedItemsData.length === 0) {
-            batchEditorCommonTagsDiv.innerHTML = '<p>Error: No valid selected items found.</p>';
-            batchEditorPartialTagsDiv.innerHTML = '<p>Error loading data.</p>';
-            return;
-        }
-        let commonTags = new Set(selectedItemsData[0].tags);
-        const allTagsInSelection = new Map();
-        selectedItemsData.forEach((item, idx) => {
+
+        let commonTags = new Set(activeSelectedItemsData[0].tags);
+        const allTagsInSelection = new Map(); // tag -> count
+
+        activeSelectedItemsData.forEach((item, idx) => {
             const currentItemTags = new Set(item.tags);
-            if (idx > 0) {
+            if (idx > 0) { // For common tags, intersect with previous
                 commonTags = new Set([...commonTags].filter(tag => currentItemTags.has(tag)));
             }
-            item.tags.forEach(tag => {
+            item.tags.forEach(tag => { // For all tags in selection
                 allTagsInSelection.set(tag, (allTagsInSelection.get(tag) || 0) + 1);
             });
         });
+
         batchEditorCommonTagsDiv.innerHTML = '';
         if (commonTags.size > 0) {
             [...commonTags].sort().forEach(tag => {
-                const span = document.createElement('span');
-                span.classList.add('tag');
-                span.textContent = tag;
+                const span = document.createElement('span'); span.classList.add('tag'); span.textContent = tag;
                 batchEditorCommonTagsDiv.appendChild(span);
             });
         } else {
             batchEditorCommonTagsDiv.innerHTML = '<p>None</p>';
         }
+
         batchEditorPartialTagsDiv.innerHTML = '';
         let partialTagsFound = false;
         const sortedAllTags = [...allTagsInSelection.entries()].sort((a, b) => a[0].localeCompare(b[0]));
         sortedAllTags.forEach(([tag, count]) => {
-            if (!commonTags.has(tag)) {
+            if (!commonTags.has(tag)) { // Only show tags not in common
                 partialTagsFound = true;
-                const span = document.createElement('span');
-                span.classList.add('tag');
-                span.textContent = tag;
-                const countSpan = document.createElement('span');
-                countSpan.classList.add('count');
-                countSpan.textContent = `(${count}/${selectedItemsData.length})`;
-                span.appendChild(countSpan);
+                const span = document.createElement('span'); span.classList.add('tag'); span.textContent = tag;
+                const countSpan = document.createElement('span'); countSpan.classList.add('count');
+                countSpan.textContent = `(${count}/${activeSelectedItemsData.length})`; span.appendChild(countSpan);
                 batchEditorPartialTagsDiv.appendChild(span);
             }
         });
@@ -1591,34 +1763,45 @@ document.addEventListener('DOMContentLoaded', () => {
     function applyBatchEdits() {
         const tagsToAdd = parseTags(batchEditorAddTagsInput.value);
         const tagsToRemove = parseTags(batchEditorRemoveTagsInput.value);
+
         if (tagsToAdd.length === 0 && tagsToRemove.length === 0) {
             batchEditorStatus.textContent = "No tags specified to add or remove.";
             batchEditorStatus.style.color = 'var(--status-color)';
             return;
         }
+
         let modifiedCount = 0;
         let overallStatsChanged = false;
-        selectedItemIds.forEach(id => {
+
+        selectedItemIds.forEach(id => { // Iterate over original selection IDs
             const index = findIndexById(id);
-            if (index === -1) return;
+            if (index === -1) return; 
             const item = allImageData[index];
+            if (item.isTrashed) return; // Skip trashed items, though openBatchEditor should prevent this state
+
             const originalItemTagsString = joinTags(item.tags);
-            let currentItemTags = new Set(item.tags);
-            tagsToAdd.forEach(tag => currentItemTags.add(tag));
-            tagsToRemove.forEach(tag => currentItemTags.delete(tag));
-            const newItemTagsArray = [...currentItemTags].sort();
+            let currentItemTagsSet = new Set(item.tags);
+
+            tagsToAdd.forEach(tag => currentItemTagsSet.add(tag));
+            tagsToRemove.forEach(tag => currentItemTagsSet.delete(tag));
+            
+            const newItemTagsArray = [...currentItemTagsSet].sort(); // Convert set to sorted array
             const newItemTagsString = joinTags(newItemTagsArray);
+
             if (newItemTagsString !== originalItemTagsString) {
                 const oldTagsForStatUpdate = parseTags(originalItemTagsString);
                 const addedForStatUpdate = newItemTagsArray.filter(t => !oldTagsForStatUpdate.includes(t));
                 const removedForStatUpdate = oldTagsForStatUpdate.filter(t => !newItemTagsArray.includes(t));
+
                 if (addedForStatUpdate.length > 0 || removedForStatUpdate.length > 0) {
                     updateTagStatsIncremental(addedForStatUpdate, removedForStatUpdate);
                     overallStatsChanged = true;
                 }
+
                 item.tags = newItemTagsArray;
                 item.modified = true;
                 modifiedCount++;
+
                 const gridItem = document.getElementById(item.id);
                 if (gridItem) {
                     gridItem.classList.add('modified');
@@ -1627,18 +1810,51 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         });
+
         if (modifiedCount > 0) {
-            saveAllBtn.disabled = false;
-            if (overallStatsChanged) recalculateAllTagStats();
-            batchEditorStatus.textContent = `Changes applied to ${modifiedCount} item(s). Remember to save all.`;
+            updateSaveAllButtonState();
+            if (overallStatsChanged) recalculateAllTagStats(); // Global recalculation
+            batchEditorStatus.textContent = `Tag changes applied to ${modifiedCount} item(s). Remember to "Save All Changes".`;
             batchEditorStatus.style.color = 'var(--success-color)';
-            batchEditorAddTagsInput.value = '';
+            batchEditorAddTagsInput.value = ''; // Clear inputs after successful application
             batchEditorRemoveTagsInput.value = '';
         } else {
-            batchEditorStatus.textContent = "No changes made to selected items.";
+            batchEditorStatus.textContent = "No changes made to selected items (tags might already be present/absent).";
             batchEditorStatus.style.color = 'var(--status-color)';
         }
     }
+    
+    function batchMoveSelectedToTrash() {
+        if (selectedItemIds.size === 0) {
+            batchEditorStatus.textContent = "No items selected to move to trash.";
+            batchEditorStatus.style.color = 'var(--error-color)';
+            return;
+        }
+        if (confirm(`Move ${selectedItemIds.size} selected item(s) to trash?`)) {
+            let movedCount = 0;
+            // Create a copy of selectedItemIds because moveToTrash modifies it
+            const idsToTrash = new Set(selectedItemIds); 
+            idsToTrash.forEach(itemId => {
+                const item = allImageData.find(i => i.id === itemId);
+                if (item && !item.isTrashed) {
+                    moveToTrash(itemId); // This function handles individual UI and state updates
+                    movedCount++;
+                }
+            });
+
+            if (movedCount > 0) {
+                updateStatus(`Moved ${movedCount} item(s) to trash.`);
+            } else {
+                updateStatus("No active items were moved to trash (they might have been already trashed).");
+            }
+            closeBatchEditor();
+            filterAndSearch(); // Refresh grid view as items are now trashed
+        } else {
+            batchEditorStatus.textContent = "Move to trash cancelled.";
+            batchEditorStatus.style.color = 'var(--status-color)';
+        }
+    }
+
 
     function closeBatchEditor() {
         batchEditorModal.classList.add('hidden');
@@ -1660,45 +1876,24 @@ document.addEventListener('DOMContentLoaded', () => {
             customRules = [];
             updateStatus("Error loading custom rules from storage. Check console.");
         }
-
-        if (customRules.length === 0) {
+        if (customRules.length === 0) { // Add defaults if none exist
             customRules.push({
-                id: generateRuleId('default-replace-underscores'),
-                name: "Default: Replace Underscores with Spaces",
-                find: "_",
-                replace: " ",
-                isRegex: false,
-                isCaseSensitive: false, 
-                applyTo: "all",
-                specificTags: []
+                id: generateRuleId('default-replace-underscores'), name: "Default: Replace Underscores with Spaces",
+                find: "_", replace: " ", isRegex: false, isCaseSensitive: false, applyTo: "all", specificTags: []
             });
             customRules.push({
-                id: generateRuleId('default-escape-parentheses'),
-                name: "Default: Escape Parentheses () -> \\(\\) ",
-                find: "(\\(|\\))", 
-                replace: "\\\\$1", 
-                isRegex: true,
-                isCaseSensitive: true, 
-                applyTo: "all",
-                specificTags: []
+                id: generateRuleId('default-escape-parentheses'), name: "Default: Escape Parentheses () -> \\(\\) ",
+                find: "(\\(|\\))", replace: "\\\\$1", isRegex: true, isCaseSensitive: true, applyTo: "all", specificTags: []
             });
             customRules.push({
-                id: generateRuleId('default-smart-brackets'),
-                name: "Default: Format 'word_(info)' to 'word from info'",
-                find: "^([^\\s_()]+)(?:_)?\\(([^)]+)\\)$",
-                replace: "$1 from $2",
-                isRegex: true,
-                isCaseSensitive: false, 
-                applyTo: "all",
-                specificTags: []
+                id: generateRuleId('default-smart-brackets'), name: "Default: Format 'word_(info)' to 'word from info'",
+                find: "^([^\\s_()]+)(?:_)?\\(([^)]+)\\)$", replace: "$1 from $2", isRegex: true, isCaseSensitive: false, applyTo: "all", specificTags: []
             });
             saveCustomRules(); 
         }
-
         renderCustomRulesList();
         populateCustomRulesBulkApplyDropdown();
     }
-
     function saveCustomRules() {
         try {
             localStorage.setItem(CUSTOM_RULES_STORAGE_KEY, JSON.stringify(customRules));
@@ -1707,83 +1902,51 @@ document.addEventListener('DOMContentLoaded', () => {
             updateStatus("Error saving custom rules to storage. Check console.");
         }
     }
-
     function renderCustomRulesList() {
         customRulesListDiv.innerHTML = '';
         if (customRules.length === 0) {
-            customRulesListDiv.innerHTML = '<p>No custom rules defined yet.</p>';
-            return;
+            customRulesListDiv.innerHTML = '<p>No custom rules defined yet.</p>'; return;
         }
-        const ul = document.createElement('ul');
-        ul.classList.add('custom-rule-item-list');
+        const ul = document.createElement('ul'); ul.classList.add('custom-rule-item-list');
         customRules.forEach(rule => {
-            const li = document.createElement('li');
-            li.dataset.ruleId = rule.id;
-            const nameSpan = document.createElement('span');
-            nameSpan.classList.add('rule-name');
-            nameSpan.textContent = rule.name;
-            li.appendChild(nameSpan);
-            const summarySpan = document.createElement('span');
-            summarySpan.classList.add('rule-summary');
+            const li = document.createElement('li'); li.dataset.ruleId = rule.id;
+            const nameSpan = document.createElement('span'); nameSpan.classList.add('rule-name'); nameSpan.textContent = rule.name; li.appendChild(nameSpan);
+            const summarySpan = document.createElement('span'); summarySpan.classList.add('rule-summary');
             let findText = rule.find.length > 20 ? rule.find.substring(0, 17) + "..." : rule.find;
             let replaceText = rule.replace.length > 20 ? rule.replace.substring(0, 17) + "..." : rule.replace;
-            summarySpan.textContent = `Find: "${escapeHtml(findText)}", Replace: "${escapeHtml(replaceText)}" ${rule.isRegex ? '(Regex)' : ''}`;
-            li.appendChild(summarySpan);
-            const actionsDiv = document.createElement('div');
-            actionsDiv.classList.add('rule-actions');
-            const editBtn = document.createElement('button');
-            editBtn.textContent = 'Edit';
-            editBtn.classList.add('edit-rule-btn');
-            editBtn.addEventListener('click', () => openRuleEditor(rule.id));
-            actionsDiv.appendChild(editBtn);
-            const deleteBtn = document.createElement('button');
-            deleteBtn.textContent = 'Delete';
-            deleteBtn.classList.add('delete-rule-btn');
-            deleteBtn.addEventListener('click', () => deleteCustomRule(rule.id));
-            actionsDiv.appendChild(deleteBtn);
-            li.appendChild(actionsDiv);
-            ul.appendChild(li);
+            summarySpan.textContent = `Find: "${escapeHtml(findText)}", Replace: "${escapeHtml(replaceText)}" ${rule.isRegex ? '(Regex)' : ''}`; li.appendChild(summarySpan);
+            const actionsDiv = document.createElement('div'); actionsDiv.classList.add('rule-actions');
+            const editBtn = document.createElement('button'); editBtn.textContent = 'Edit'; editBtn.classList.add('edit-rule-btn');
+            editBtn.addEventListener('click', () => openRuleEditor(rule.id)); actionsDiv.appendChild(editBtn);
+            const deleteBtn = document.createElement('button'); deleteBtn.textContent = 'Delete'; deleteBtn.classList.add('delete-rule-btn');
+            deleteBtn.addEventListener('click', () => deleteCustomRule(rule.id)); actionsDiv.appendChild(deleteBtn);
+            li.appendChild(actionsDiv); ul.appendChild(li);
         });
         customRulesListDiv.appendChild(ul);
     }
-
     function populateCustomRulesBulkApplyDropdown() {
         bulkApplyCustomRulesSelect.innerHTML = '';
         if (customRules.length === 0) {
-            const option = document.createElement('option');
-            option.value = "";
-            option.textContent = "No custom rules defined";
-            option.disabled = true;
+            const option = document.createElement('option'); option.value = ""; option.textContent = "No custom rules defined"; option.disabled = true;
             bulkApplyCustomRulesSelect.appendChild(option);
             bulkApplyCustomRulesBtn.disabled = true;
         } else {
             customRules.forEach(rule => {
-                const option = document.createElement('option');
-                option.value = rule.id;
-                option.textContent = rule.name;
+                const option = document.createElement('option'); option.value = rule.id; option.textContent = rule.name;
                 bulkApplyCustomRulesSelect.appendChild(option);
             });
             bulkApplyCustomRulesBtn.disabled = false;
         }
     }
-
     function openRuleEditor(ruleId = null) {
         editingRuleId = ruleId;
         ruleEditorModal.classList.remove('hidden');
-        ruleEditorStatus.textContent = '';
-        ruleSpecificTagsGroup.style.display = 'none';
+        ruleEditorStatus.textContent = ''; ruleSpecificTagsGroup.style.display = 'none';
         if (ruleId) {
             const rule = customRules.find(r => r.id === ruleId);
-            if (!rule) {
-                ruleEditorStatus.textContent = 'Error: Rule not found.';
-                ruleEditorStatus.style.color = 'var(--error-color)';
-                return;
-            }
-            ruleEditorTitle.textContent = 'Edit Custom Rule';
-            ruleIdInput.value = rule.id;
-            ruleNameInput.value = rule.name;
-            ruleFindInput.value = rule.find;
-            ruleReplaceInput.value = rule.replace;
+            if (!rule) { ruleEditorStatus.textContent = 'Error: Rule not found.'; ruleEditorStatus.style.color = 'var(--error-color)'; return; }
+            ruleEditorTitle.textContent = 'Edit Custom Rule'; ruleIdInput.value = rule.id;
+            ruleNameInput.value = rule.name; ruleFindInput.value = rule.find; ruleReplaceInput.value = rule.replace;
             ruleIsRegexCheckbox.checked = rule.isRegex;
             ruleIsCaseSensitiveCheckbox.checked = rule.isRegex ? rule.isCaseSensitive : false;
             ruleIsCaseSensitiveCheckbox.disabled = !rule.isRegex;
@@ -1793,107 +1956,45 @@ document.addEventListener('DOMContentLoaded', () => {
                 ruleSpecificTagsInput.value = rule.specificTags ? rule.specificTags.join(', ') : '';
             }
         } else {
-            ruleEditorTitle.textContent = 'Create New Custom Rule';
-            ruleIdInput.value = generateRuleId();
-            ruleNameInput.value = '';
-            ruleFindInput.value = '';
-            ruleReplaceInput.value = '';
-            ruleIsRegexCheckbox.checked = false;
-            ruleIsCaseSensitiveCheckbox.checked = false;
-            ruleIsCaseSensitiveCheckbox.disabled = true;
-            ruleApplyToSelect.value = 'all';
-            ruleSpecificTagsInput.value = '';
+            ruleEditorTitle.textContent = 'Create New Custom Rule'; ruleIdInput.value = generateRuleId();
+            ruleNameInput.value = ''; ruleFindInput.value = ''; ruleReplaceInput.value = '';
+            ruleIsRegexCheckbox.checked = false; ruleIsCaseSensitiveCheckbox.checked = false; ruleIsCaseSensitiveCheckbox.disabled = true;
+            ruleApplyToSelect.value = 'all'; ruleSpecificTagsInput.value = '';
         }
         ruleNameInput.focus();
     }
-
-    function closeRuleEditor() {
-        ruleEditorModal.classList.add('hidden');
-        editingRuleId = null;
-    }
+    function closeRuleEditor() { ruleEditorModal.classList.add('hidden'); editingRuleId = null; }
     ruleIsRegexCheckbox.addEventListener('change', () => {
         ruleIsCaseSensitiveCheckbox.disabled = !ruleIsRegexCheckbox.checked;
-        if (!ruleIsRegexCheckbox.checked) {
-            ruleIsCaseSensitiveCheckbox.checked = false;
-        }
+        if (!ruleIsRegexCheckbox.checked) ruleIsCaseSensitiveCheckbox.checked = false;
     });
     ruleApplyToSelect.addEventListener('change', () => {
-        if (ruleApplyToSelect.value === 'only_if_is' || ruleApplyToSelect.value === 'not_if_is') {
-            ruleSpecificTagsGroup.style.display = 'block';
-        } else {
-            ruleSpecificTagsGroup.style.display = 'none';
-        }
+        ruleSpecificTagsGroup.style.display = (ruleApplyToSelect.value === 'only_if_is' || ruleApplyToSelect.value === 'not_if_is') ? 'block' : 'none';
     });
     ruleEditorSaveBtn.addEventListener('click', () => {
-        const id = ruleIdInput.value;
-        const name = ruleNameInput.value.trim();
-        const findPattern = ruleFindInput.value;
-        const replacePattern = ruleReplaceInput.value;
-        const isRegex = ruleIsRegexCheckbox.checked;
-        const isCaseSensitive = ruleIsCaseSensitiveCheckbox.checked;
-        const applyTo = ruleApplyToSelect.value;
-        const specificTags = parseTags(ruleSpecificTagsInput.value);
-        if (!name) {
-            ruleEditorStatus.textContent = 'Rule name is required.';
-            ruleEditorStatus.style.color = 'var(--error-color)';
-            return;
-        }
-        if (!findPattern && !isRegex) { // findPattern can be empty for regex (e.g. ^ to prepend)
-            ruleEditorStatus.textContent = 'Find pattern is required for non-regex rules.';
-            ruleEditorStatus.style.color = 'var(--error-color)';
-            return;
-        }
+        const id = ruleIdInput.value; const name = ruleNameInput.value.trim();
+        const findPattern = ruleFindInput.value; const replacePattern = ruleReplaceInput.value;
+        const isRegex = ruleIsRegexCheckbox.checked; const isCaseSensitive = ruleIsCaseSensitiveCheckbox.checked;
+        const applyTo = ruleApplyToSelect.value; const specificTags = parseTags(ruleSpecificTagsInput.value);
+        if (!name) { ruleEditorStatus.textContent = 'Rule name is required.'; ruleEditorStatus.style.color = 'var(--error-color)'; return; }
+        if (!findPattern && !isRegex) { ruleEditorStatus.textContent = 'Find pattern required for non-regex.'; ruleEditorStatus.style.color = 'var(--error-color)'; return; }
         if ((applyTo === 'only_if_is' || applyTo === 'not_if_is') && specificTags.length === 0) {
-            ruleEditorStatus.textContent = 'Please provide specific tags for this "Apply To" condition.';
-            ruleEditorStatus.style.color = 'var(--error-color)';
-            return;
+            ruleEditorStatus.textContent = 'Specific tags required for this "Apply To" condition.'; ruleEditorStatus.style.color = 'var(--error-color)'; return;
         }
-        if (isRegex) {
-            try {
-                new RegExp(findPattern);
-            } catch (e) {
-                ruleEditorStatus.textContent = `Invalid Regular Expression in Find pattern: ${e.message}`;
-                ruleEditorStatus.style.color = 'var(--error-color)';
-                return;
-            }
-        }
-        const ruleData = {
-            id,
-            name,
-            find: findPattern,
-            replace: replacePattern,
-            isRegex,
-            isCaseSensitive,
-            applyTo,
-            specificTags
-        };
-        if (editingRuleId) {
-            const index = customRules.findIndex(r => r.id === editingRuleId);
-            if (index !== -1) {
-                customRules[index] = ruleData;
-            } else {
-                customRules.push(ruleData);
-            }
-        } else {
-            customRules.push(ruleData);
-        }
-        saveCustomRules();
-        renderCustomRulesList();
-        populateCustomRulesBulkApplyDropdown();
-        closeRuleEditor();
+        if (isRegex) { try { new RegExp(findPattern); } catch (e) { ruleEditorStatus.textContent = `Invalid Regex: ${e.message}`; ruleEditorStatus.style.color = 'var(--error-color)'; return; } }
+        const ruleData = { id, name, find: findPattern, replace: replacePattern, isRegex, isCaseSensitive, applyTo, specificTags };
+        const index = editingRuleId ? customRules.findIndex(r => r.id === editingRuleId) : -1;
+        if (index !== -1) customRules[index] = ruleData; else customRules.push(ruleData);
+        saveCustomRules(); renderCustomRulesList(); populateCustomRulesBulkApplyDropdown(); closeRuleEditor();
         updateStatus(`Custom rule "${name}" ${editingRuleId ? 'updated' : 'created'}.`);
     });
-
     function deleteCustomRule(ruleId) {
-        if (confirm(`Are you sure you want to delete the custom rule: "${customRules.find(r=>r.id===ruleId)?.name || 'this rule'}"?`)) {
+        if (confirm(`Delete rule: "${customRules.find(r=>r.id===ruleId)?.name || 'this rule'}"?`)) {
             customRules = customRules.filter(r => r.id !== ruleId);
-            saveCustomRules();
-            renderCustomRulesList();
-            populateCustomRulesBulkApplyDropdown();
+            saveCustomRules(); renderCustomRulesList(); populateCustomRulesBulkApplyDropdown();
             updateStatus('Custom rule deleted.');
         }
     }
-
     function applySingleCustomRuleToTag(tag, rule) {
         let newTag = tag;
         const applyThisRule = () => {
@@ -1902,59 +2003,37 @@ document.addEventListener('DOMContentLoaded', () => {
                     const flags = 'g' + (rule.isCaseSensitive ? '' : 'i');
                     const regex = new RegExp(rule.find, flags);
                     newTag = newTag.replace(regex, rule.replace);
-                } catch (e) {
-                    console.warn(`Error applying regex rule "${rule.name}" to tag "${tag}": ${e.message}`);
-                    return tag;
-                }
+                } catch (e) { console.warn(`Regex error rule "${rule.name}" tag "${tag}": ${e.message}`); return tag; }
             } else {
                 if (rule.find === '') return newTag; 
-                if (rule.isCaseSensitive) { // Stricter interpretation: non-regex case sensitive means direct string replacement
-                    newTag = newTag.split(rule.find).join(rule.replace);
-                } else { // Non-regex, case-insensitive
-                    const escFind = rule.find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                    const regex = new RegExp(escFind, 'gi');
-                    newTag = newTag.replace(regex, rule.replace);
-                }
+                if (rule.isCaseSensitive) { newTag = newTag.split(rule.find).join(rule.replace); } 
+                else { const escFind = rule.find.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); const regex = new RegExp(escFind, 'gi'); newTag = newTag.replace(regex, rule.replace); }
             }
             return newTag;
         };
         switch (rule.applyTo) {
-            case 'all':
-                return applyThisRule();
-            case 'only_if_is':
-                if (rule.specificTags.includes(tag)) {
-                    return applyThisRule();
-                }
-                break;
-            case 'not_if_is':
-                if (!rule.specificTags.includes(tag)) {
-                    return applyThisRule();
-                }
-                break;
+            case 'all': return applyThisRule();
+            case 'only_if_is': if (rule.specificTags.includes(tag)) return applyThisRule(); break;
+            case 'not_if_is': if (!rule.specificTags.includes(tag)) return applyThisRule(); break;
         }
         return tag;
     }
-
-    function performBulkCustomRulesOperation() {
+    function performBulkCustomRulesOperation() { // Operates on active items
         const selectedRuleIds = Array.from(bulkApplyCustomRulesSelect.selectedOptions).map(opt => opt.value);
-        if (selectedRuleIds.length === 0) {
-            updateStatus("No custom rules selected to apply.");
-            return;
-        }
+        if (selectedRuleIds.length === 0) { updateStatus("No custom rules selected."); return; }
         const rulesToApply = selectedRuleIds.map(id => customRules.find(r => r.id === id)).filter(r => r);
-        if (rulesToApply.length === 0) {
-            updateStatus("Selected custom rules not found. This should not happen.");
-            return;
+        if (rulesToApply.length === 0) { updateStatus("Selected rules not found."); return; }
+        
+        const activeItems = getActiveItems();
+        if (activeItems.length === 0) { updateStatus("No active images to apply rules to."); return; }
+
+        if (!confirm(`Apply ${rulesToApply.length} rule(s) to ALL ${activeItems.length} active images?`)) {
+            updateStatus("Rule application cancelled."); return;
         }
-        if (!confirm(`Apply ${rulesToApply.length} selected custom rule(s) to ALL images?`)) {
-            updateStatus("Custom rule application cancelled.");
-            return;
-        }
-        updateStatus(`Applying ${rulesToApply.length} custom rule(s)...`, true);
-        let modCount = 0;
-        let affectedItemIds = new Set();
-        let overallStatsChanged = false;
-        allImageData.forEach(item => {
+        updateStatus(`Applying ${rulesToApply.length} custom rule(s) to active images...`, true);
+        let modCount = 0; let affectedItemIds = new Set(); let overallStatsChanged = false;
+
+        activeItems.forEach(item => { // Iterate only over active items
             let originalItemTagsString = joinTags(item.tags);
             let currentItemTagsArray = [...item.tags];
             rulesToApply.forEach(rule => {
@@ -1962,15 +2041,12 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             currentItemTagsArray = [...new Set(currentItemTagsArray.map(t => t.trim()).filter(t => t))]; 
             if (joinTags(currentItemTagsArray) !== originalItemTagsString) {
-                item.tags = currentItemTagsArray;
-                item.modified = true;
-                modCount++;
-                affectedItemIds.add(item.id);
-                overallStatsChanged = true;
+                item.tags = currentItemTagsArray; item.modified = true;
+                modCount++; affectedItemIds.add(item.id); overallStatsChanged = true;
             }
         });
         if (modCount > 0) {
-            saveAllBtn.disabled = false;
+            updateSaveAllButtonState();
             affectedItemIds.forEach(id => {
                 const gridItem = document.getElementById(id);
                 const itemData = allImageData.find(i => i.id === id);
@@ -1981,9 +2057,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             });
             if (overallStatsChanged) recalculateAllTagStats();
-            updateStatus(`${modCount} items affected by custom rules. Save changes.`, false);
+            updateStatus(`${modCount} active items affected. Save changes.`, false);
         } else {
-            updateStatus(`Custom rules applied. No changes made to any items.`, false);
+            updateStatus(`Rules applied. No changes to active items.`, false);
         }
     }
 
@@ -1998,152 +2074,113 @@ document.addEventListener('DOMContentLoaded', () => {
         const isTextareaFocused = editorTagsTextarea.isSameNode(activeElement);
         const isImageZoomed = editorImagePreview.classList.contains('zoomed');
         const suggestionsVisible = !editorTagSuggestionsBox.classList.contains('hidden');
+
         if ((event.ctrlKey || event.metaKey) && event.key === 's') {
             event.preventDefault();
             if (!saveAllBtn.disabled) saveAllChanges();
             return;
         }
+
         if (isTextareaFocused && suggestionsVisible) {
             if (event.key === 'ArrowDown') {
-                event.preventDefault();
-                updateActiveSuggestion((activeSuggestionIndex + 1) % currentSuggestions.length);
-                return;
+                event.preventDefault(); updateActiveSuggestion((activeSuggestionIndex + 1) % currentSuggestions.length); return;
             }
             if (event.key === 'ArrowUp') {
-                event.preventDefault();
-                updateActiveSuggestion((activeSuggestionIndex - 1 + currentSuggestions.length) % currentSuggestions.length);
-                return;
+                event.preventDefault(); updateActiveSuggestion((activeSuggestionIndex - 1 + currentSuggestions.length) % currentSuggestions.length); return;
             }
             if ((event.key === 'Enter' || event.key === 'Tab') && activeSuggestionIndex !== -1) {
-                event.preventDefault();
-                selectSuggestion(currentSuggestions[activeSuggestionIndex]);
-                return;
+                event.preventDefault(); selectSuggestion(currentSuggestions[activeSuggestionIndex]); return;
             }
-            if (event.key === 'Escape') {
-                event.preventDefault();
-                hideSuggestions();
-                return;
-            }
+            if (event.key === 'Escape') { event.preventDefault(); hideSuggestions(); return; }
         }
+
         if (event.key === 'Escape') {
-            if (isImageZoomed) {
-                toggleEditorImageZoom();
-                return;
-            }
-            if (isRuleEditorOpen) {
-                closeRuleEditor();
-                return;
-            }
-            if (isSingleEditorOpen) closeEditor();
-            else if (isBatchEditorOpen) closeBatchEditor();
-            else if (selectedItemIds.size > 0) clearSelection();
-            else if (isInputFocusedGeneral && activeElement.value !== '') {
+            if (isImageZoomed) { toggleEditorImageZoom(); return; }
+            if (isRuleEditorOpen) { closeRuleEditor(); return; }
+            if (isSingleEditorOpen) { closeEditor(); return; }
+            if (isBatchEditorOpen) { closeBatchEditor(); return; }
+            if (selectedItemIds.size > 0) { clearSelection(); return; }
+            if (isInputFocusedGeneral && activeElement.value !== '') {
                 activeElement.value = '';
-                if (activeElement.id === 'tag-frequency-search') activeElement.dispatchEvent(new Event('input', {
-                    bubbles: true
-                }));
-            } else if (keyboardFocusIndex !== -1) clearKeyboardFocus();
-            return;
+                if (activeElement.id === 'tag-frequency-search') activeElement.dispatchEvent(new Event('input', { bubbles: true }));
+                return;
+            }
+            if (keyboardFocusIndex !== -1) { clearKeyboardFocus(); return; }
         }
+
         if (event.key === 'Enter' && isInputFocusedGeneral && !isModalOpen) {
             let buttonToClick = null;
             switch (activeElement.id) {
-                case 'search-tags':
-                case 'exclude-tags':
-                    buttonToClick = filterBtn;
-                    break;
-                case 'rename-old-tag':
-                case 'rename-new-tag':
-                    buttonToClick = renameTagBtn;
-                    break;
-                case 'remove-tag-name':
-                    buttonToClick = removeTagBtn;
-                    break;
-                case 'add-trigger-words':
-                    buttonToClick = addTagsBtn;
-                    break;
-                case 'tag-frequency-search':
-                    event.preventDefault();
-                    return;
-                case 'sort-property':
-                case 'sort-order':
-                    buttonToClick = applySortBtn;
-                    break;
+                case 'search-tags': case 'exclude-tags': buttonToClick = filterBtn; break;
+                case 'rename-old-tag': case 'rename-new-tag': buttonToClick = renameTagBtn; break;
+                case 'remove-tag-name': buttonToClick = removeTagBtn; break;
+                case 'add-trigger-words': buttonToClick = addTagsBtn; break;
+                case 'tag-frequency-search': event.preventDefault(); return; // Don't trigger anything
+                case 'sort-property': case 'sort-order': buttonToClick = applySortBtn; break;
             }
-            if (buttonToClick && !buttonToClick.disabled) {
+            if (buttonToClick && !buttonToClick.disabled) { event.preventDefault(); buttonToClick.click(); return; }
+        }
+        
+        const currentEditorItem = (currentEditIndex !== -1) ? allImageData[currentEditIndex] : null;
+        if (isSingleEditorOpen && !isTextareaFocused && !isImageZoomed && (!currentEditorItem || !currentEditorItem.isTrashed)) { // Nav only if editor open AND not on textarea AND image not zoomed AND item not trashed
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
                 event.preventDefault();
-                buttonToClick.click();
+                navigateEditor(event.key === 'ArrowLeft' ? 'previous' : 'next');
                 return;
             }
         }
-        if (isSingleEditorOpen && !isTextareaFocused && !isImageZoomed && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
-            event.preventDefault();
-            navigateEditor(event.key === 'ArrowLeft' ? 'previous' : 'next');
-            return;
-        }
+
         if (!isModalOpen && !isInputFocusedGeneral && displayedImageDataIndices.length > 0) {
-            let newIndex = keyboardFocusIndex;
+            let newFocusDisplayIndex = keyboardFocusIndex; // keyboardFocusIndex is index in displayedImageDataIndices
             let handled = false;
-            if (newIndex === -1 && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
-                newIndex = 0;
-                handled = true;
-            } else {
+            if (newFocusDisplayIndex === -1 && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+                newFocusDisplayIndex = 0; handled = true;
+            } else if (newFocusDisplayIndex !== -1) { // Only if already focused
                 let columns = 1;
                 const gridWidth = imageGrid.offsetWidth;
-                const firstItemElement = imageGrid.querySelector('.grid-item');
+                const firstItemElement = imageGrid.querySelector('.grid-item:not(.trashed-item)'); // Use an active item for measurement
                 if (firstItemElement) {
                     const itemStyle = getComputedStyle(firstItemElement);
                     const itemOuterWidth = firstItemElement.offsetWidth + parseInt(itemStyle.marginLeft) + parseInt(itemStyle.marginRight);
                     if (itemOuterWidth > 0) columns = Math.max(1, Math.floor(gridWidth / itemOuterWidth));
                 }
                 switch (event.key) {
-                    case 'ArrowLeft':
-                        newIndex = Math.max(0, newIndex - 1);
-                        handled = true;
-                        break;
-                    case 'ArrowRight':
-                        newIndex = Math.min(displayedImageDataIndices.length - 1, newIndex + 1);
-                        handled = true;
-                        break;
-                    case 'ArrowDown':
-                        newIndex = Math.min(displayedImageDataIndices.length - 1, newIndex + columns);
-                        handled = true;
-                        break;
-                    case 'ArrowUp':
-                        newIndex = Math.max(0, newIndex - columns);
-                        handled = true;
-                        break;
+                    case 'ArrowLeft': newFocusDisplayIndex = Math.max(0, newFocusDisplayIndex - 1); handled = true; break;
+                    case 'ArrowRight': newFocusDisplayIndex = Math.min(displayedImageDataIndices.length - 1, newFocusDisplayIndex + 1); handled = true; break;
+                    case 'ArrowUp': newFocusDisplayIndex = Math.max(0, newFocusDisplayIndex - columns); handled = true; break;
+                    case 'ArrowDown': newFocusDisplayIndex = Math.min(displayedImageDataIndices.length - 1, newFocusDisplayIndex + columns); handled = true; break;
                     case 'Enter':
-                        if (keyboardFocusIndex !== -1) {
-                            const globalIdx = displayedImageDataIndices[keyboardFocusIndex];
-                            const itemId = allImageData[globalIdx]?.id;
-                            if (itemId) {
-                                clearSelection();
-                                addSelection(itemId);
-                                openEditor(itemId);
-                            }
-                            handled = true;
+                        const globalIdx = displayedImageDataIndices[keyboardFocusIndex];
+                        const itemToOpen = allImageData[globalIdx];
+                        if (itemToOpen && !itemToOpen.isTrashed) { // Can only open non-trashed
+                            clearSelection(); addSelection(itemToOpen.id); openEditor(itemToOpen.id);
                         }
-                        break;
+                        handled = true; break;
                 }
             }
             if (handled) {
                 event.preventDefault();
-                if (newIndex !== keyboardFocusIndex || event.key === 'Enter') setKeyboardFocus(newIndex);
+                if (newFocusDisplayIndex !== keyboardFocusIndex || event.key === 'Enter') {
+                    setKeyboardFocus(newFocusDisplayIndex);
+                }
             }
         }
     }
 
     function toggleEditorImageZoom() {
         editorImagePreview.classList.toggle('zoomed');
-        editorModalContent.classList.toggle('image-zoomed');
+        editorModalContent.classList.toggle('image-zoomed'); // Used to hide other content
     }
 
     function handleDocumentClickToClearSelection(event) {
-        const isModalOpen = !editorModal.classList.contains('hidden') || !batchEditorModal.classList.contains('hidden') || !ruleEditorModal.classList.contains('hidden');
+        const isModalOpen = !editorModal.classList.contains('hidden') || 
+                            !batchEditorModal.classList.contains('hidden') || 
+                            !ruleEditorModal.classList.contains('hidden');
         if (isModalOpen) return;
+
         const clickedOnGridItem = event.target.closest('.grid-item');
         const clickedOnBatchEditBtn = event.target.closest('#batch-edit-selection-btn');
+        // Don't clear selection if clicking on these specific elements
         if (!clickedOnGridItem && !clickedOnBatchEditBtn) {
             if (selectedItemIds.size > 0) clearSelection();
         }
@@ -2152,21 +2189,23 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Event Listeners Setup ---
     loadDatasetBtn.addEventListener('click', loadDataset);
     saveAllBtn.addEventListener('click', saveAllChanges);
+    emptyTrashBtn.addEventListener('click', permanentlyDeleteTrashedItems);
     themeToggleBtn.addEventListener('click', toggleTheme);
     batchEditSelectionBtn.addEventListener('click', openBatchEditor);
+
     filterBtn.addEventListener('click', filterAndSearch);
     resetFilterBtn.addEventListener('click', resetFilters);
     applySortBtn.addEventListener('click', () => {
         currentSortProperty = sortPropertySelect.value;
         currentSortOrder = sortOrderSelect.value;
-        filterAndSearch(); 
+        filterAndSearch(); // Re-filter implies re-sort and re-render
     });
+
     renameTagBtn.addEventListener('click', () => performStandardBulkOperation('rename'));
     removeTagBtn.addEventListener('click', () => performStandardBulkOperation('remove'));
     addTagsBtn.addEventListener('click', () => performStandardBulkOperation('add'));
     removeDuplicatesBtn.addEventListener('click', () => performStandardBulkOperation('removeDuplicates'));
     
-    // Utility Button Listeners
     findDuplicateFilesBtn.addEventListener('click', findDuplicateTagFiles);
     findOrphanedMissingBtn.addEventListener('click', findOrphanedAndMissingTagFiles);
     findCaseInconsistentTagsBtn.addEventListener('click', findCaseInconsistentTags);
@@ -2174,70 +2213,49 @@ document.addEventListener('DOMContentLoaded', () => {
 
     createNewRuleBtn.addEventListener('click', () => openRuleEditor());
     ruleEditorCancelBtn.addEventListener('click', closeRuleEditor);
-    ruleEditorModal.addEventListener('click', (e) => {
-        if (e.target === ruleEditorModal) closeRuleEditor();
-    });
+    ruleEditorModal.addEventListener('click', (e) => { if (e.target === ruleEditorModal) closeRuleEditor(); });
     bulkApplyCustomRulesBtn.addEventListener('click', performBulkCustomRulesOperation);
+
     tagFrequencySearchInput.addEventListener('input', () => {
         clearTimeout(debouncedUpdateFrequencyList);
         debouncedUpdateFrequencyList = setTimeout(updateStatisticsDisplay, 300);
     });
-    editorSaveBtn.addEventListener('click', () => {
-        saveEditorChanges();
-        hideSuggestions();
-    });
+
+    editorSaveBtn.addEventListener('click', () => { saveEditorChanges(); hideSuggestions(); });
     editorCancelBtn.addEventListener('click', closeEditor);
-    editorRemoveDupsBtn.addEventListener('click', () => {
-        removeDuplicateTagsInEditor();
-        hideSuggestions();
-    });
-    editorModal.addEventListener('click', (e) => {
-        if (e.target === editorModal && !editorImagePreview.classList.contains('zoomed')) closeEditor();
-    });
+    editorRemoveDupsBtn.addEventListener('click', () => { removeDuplicateTagsInEditor(); hideSuggestions(); });
+    editorModal.addEventListener('click', (e) => { if (e.target === editorModal && !editorImagePreview.classList.contains('zoomed')) closeEditor(); });
+    
     batchEditorApplyBtn.addEventListener('click', applyBatchEdits);
+    batchEditorMoveToTrashBtn.addEventListener('click', batchMoveSelectedToTrash);
     batchEditorCancelBtn.addEventListener('click', closeBatchEditor);
-    batchEditorModal.addEventListener('click', (e) => {
-        if (e.target === batchEditorModal) closeBatchEditor();
-    });
-    editorTagsTextarea.addEventListener('input', (e) => {
-        showSuggestions(e.target);
-    });
-    editorTagsTextarea.addEventListener('blur', () => {
-        setTimeout(() => {
-            if (!editorTagSuggestionsBox.contains(document.activeElement)) hideSuggestions();
-        }, 150);
-    });
-    editorTagsTextarea.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
-            saveEditorChanges();
-            hideSuggestions();
-        }
-    });
+    batchEditorModal.addEventListener('click', (e) => { if (e.target === batchEditorModal) closeBatchEditor(); });
+
+    editorTagsTextarea.addEventListener('input', (e) => { showSuggestions(e.target); });
+    editorTagsTextarea.addEventListener('blur', () => { setTimeout(() => { if (!editorTagSuggestionsBox.contains(document.activeElement)) hideSuggestions(); }, 150); });
+    editorTagsTextarea.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveEditorChanges(); hideSuggestions(); } });
+    
     editorImagePreview.addEventListener('click', toggleEditorImageZoom);
     if (editorPrevBtn) editorPrevBtn.addEventListener('click', () => navigateEditor('previous'));
     if (editorNextBtn) editorNextBtn.addEventListener('click', () => navigateEditor('next'));
+
     document.addEventListener('keydown', handleGlobalKeyDown);
     document.addEventListener('click', handleDocumentClickToClearSelection);
 
     // --- Initial Setup ---
     loadInitialTheme();
-    loadCustomRules();
+    loadCustomRules(); // Also populates dropdown
     sortPropertySelect.value = currentSortProperty;
     sortOrderSelect.value = currentSortOrder;
     updateStatus('Ready. Load a dataset folder.');
+    updateSaveAllButtonState();
+    updateEmptyTrashButtonState();
+
     if (!window.showDirectoryPicker) {
-        updateStatus("Warning: Browser lacks File System Access API support. Core functionality will be limited.");
-        loadDatasetBtn.disabled = true;
-        saveAllBtn.disabled = true;
-        batchEditSelectionBtn.disabled = true;
-        applySortBtn.disabled = true;
-        createNewRuleBtn.disabled = true;
-        bulkApplyCustomRulesBtn.disabled = true;
-        [renameTagBtn, removeTagBtn, addTagsBtn, removeDuplicatesBtn, 
+        updateStatus("Warning: Browser lacks File System Access API. Core functionality limited.");
+        [loadDatasetBtn, saveAllBtn, emptyTrashBtn, batchEditSelectionBtn, applySortBtn, createNewRuleBtn, bulkApplyCustomRulesBtn,
+         renameTagBtn, removeTagBtn, addTagsBtn, removeDuplicatesBtn, 
          findDuplicateFilesBtn, findOrphanedMissingBtn, findCaseInconsistentTagsBtn, exportUniqueTagsBtn]
-        .forEach(btn => {
-            if (btn) btn.disabled = true;
-        });
+        .forEach(btn => { if (btn) btn.disabled = true; });
     }
 });
