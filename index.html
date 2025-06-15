@@ -81,53 +81,114 @@
                 <section class="control-section">
                     <details>
                         <summary><h2>Bulk Tag Operations</h2></summary>
-                        <h3>Standard Operations (on active images)</h3>
-                        <div class="form-group">
-                            <label for="rename-old-tag">Rename Tag:</label>
-                            <input type="text" id="rename-old-tag" placeholder="Old Tag Name">
-                            <label for="rename-new-tag">To:</label>
-                            <input type="text" id="rename-new-tag" placeholder="New Tag Name">
-                            <button id="rename-tag-btn">Rename All</button>
+                        <div>
+                            <h3>Standard Operations (on active images)</h3>
+                            <div class="form-group">
+                                <label for="rename-old-tag">Rename Tag:</label>
+                                <input type="text" id="rename-old-tag" placeholder="Old Tag Name">
+                                <label for="rename-new-tag">To:</label>
+                                <input type="text" id="rename-new-tag" placeholder="New Tag Name">
+                                <button id="rename-tag-btn">Rename All</button>
+                            </div>
+                            <div class="form-group">
+                                <label for="remove-tag-name">Remove Tag:</label>
+                                <input type="text" id="remove-tag-name" placeholder="Tag to Remove">
+                                <button id="remove-tag-btn">Remove All</button>
+                            </div>
+                            <div class="form-group">
+                                <label for="add-trigger-words">Add Tags:</label>
+                                <input type="text" id="add-trigger-words" placeholder="trigger1, word2">
+                                <button id="add-tags-btn">Add to All</button>
+                            </div>
+                            <div class="form-group">
+                               <button id="remove-duplicates-btn">Remove Duplicate Tags (Within Files)</button>
+                            </div>
+                            
+                            <hr>
+                            <h3>Apply Custom Rules (on active images)</h3>
+                            <div class="form-group">
+                                <label for="bulk-apply-custom-rules-select">Select Rule(s) to Apply (Ctrl/Cmd+Click for multiple):</label>
+                                <select id="bulk-apply-custom-rules-select" multiple size="5">
+                                </select>
+                                <button id="bulk-apply-custom-rules-btn" disabled>Apply Selected Custom Rules</button>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="remove-tag-name">Remove Tag:</label>
-                            <input type="text" id="remove-tag-name" placeholder="Tag to Remove">
-                            <button id="remove-tag-btn">Remove All</button>
+                    </details>
+                </section>
+
+                <section class="control-section">
+                    <details>
+                        <summary><h2>Utilities</h2></summary>
+                        <div>
+                            <div class="form-group">
+                               <button id="find-duplicate-files-btn">Find Files with Identical Tags</button>
+                               <div id="duplicate-files-output" class="utility-output"></div>
+                            </div>
+                            <div class="form-group">
+                                <button id="find-orphaned-missing-btn">Find Orphaned/Missing Tag Files</button>
+                                <div id="orphaned-missing-output" class="utility-output"></div>
+                            </div>
+                            <div class="form-group">
+                                <button id="find-case-inconsistent-tags-btn">Find Case-Inconsistent Tags</button>
+                                <div id="case-inconsistent-output" class="utility-output"></div>
+                            </div>
+                            <div class="form-group">
+                                <button id="export-unique-tags-btn">Export Unique Tag List (.txt)</button>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="add-trigger-words">Add Tags:</label>
-                            <input type="text" id="add-trigger-words" placeholder="trigger1, word2">
-                            <button id="add-tags-btn">Add to All</button>
+                    </details>
+                </section>
+
+                <section class="control-section">
+                    <details>
+                        <summary><h2>Dataset Unification</h2></summary>
+                        <div>
+                            <p>Rename active image and tag files to a unified format (e.g., prefix_0001.ext). Operates within existing subdirectories.</p>
+                            <div class="form-group">
+                                <label for="unify-prefix">Filename Prefix:</label>
+                                <input type="text" id="unify-prefix" value="image_">
+                            </div>
+                            <div class="form-group">
+                                <label for="unify-start-number">Start Number:</label>
+                                <input type="number" id="unify-start-number" value="1" min="0">
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <input type="checkbox" id="unify-pad-zeros" checked>
+                                <label for="unify-pad-zeros">Pad with Zeros</label>
+                            </div>
+                            <div class="form-group" id="unify-padding-length-group">
+                                <label for="unify-padding-length">Number Padding Length:</label>
+                                <input type="number" id="unify-padding-length" value="4" min="1" max="10">
+                            </div>
+                            <button id="unify-preview-btn">Preview Renaming</button>
+                            <div id="unify-preview-output" class="utility-output" style="max-height: 200px;"></div>
+                            <button id="unify-apply-btn" disabled class="button-warning">Apply Unification (Irreversible)</button>
+                            <p id="unify-status"></p>
                         </div>
-                        <div class="form-group">
-                           <button id="remove-duplicates-btn">Remove Duplicate Tags (Within Files)</button>
-                        </div>
-                        
-                        <hr>
-                        <h3>Apply Custom Rules (on active images)</h3>
-                        <div class="form-group">
-                            <label for="bulk-apply-custom-rules-select">Select Rule(s) to Apply (Ctrl/Cmd+Click for multiple):</label>
-                            <select id="bulk-apply-custom-rules-select" multiple size="5">
-                            </select>
-                            <button id="bulk-apply-custom-rules-btn" disabled>Apply Selected Custom Rules</button>
-                        </div>
-                        
-                        <hr>
-                        <h3>Utilities (on active images)</h3>
-                        <div class="form-group">
-                           <button id="find-duplicate-files-btn">Find Files with Identical Tags</button>
-                           <div id="duplicate-files-output" class="utility-output"></div>
-                        </div>
-                        <div class="form-group">
-                            <button id="find-orphaned-missing-btn">Find Orphaned/Missing Tag Files</button>
-                            <div id="orphaned-missing-output" class="utility-output"></div>
-                        </div>
-                        <div class="form-group">
-                            <button id="find-case-inconsistent-tags-btn">Find Case-Inconsistent Tags</button>
-                            <div id="case-inconsistent-output" class="utility-output"></div>
-                        </div>
-                        <div class="form-group">
-                            <button id="export-unique-tags-btn">Export Unique Tag List (.txt)</button>
+                    </details>
+                </section>
+
+                <section class="control-section">
+                    <details>
+                        <summary><h2>Image Format Conversion</h2></summary>
+                        <div>
+                            <p>Convert active images to a selected format. This operation changes file extensions and may affect file size/quality.</p>
+                            <div class="form-group">
+                                <label for="convert-format-select">Target Format:</label>
+                                <select id="convert-format-select">
+                                    <option value="png">PNG (Lossless)</option>
+                                    <option value="jpeg">JPEG (Lossy)</option>
+                                    <option value="webp">WEBP (Lossy/Lossless)</option>
+                                </select>
+                            </div>
+                            <div class="form-group" id="convert-quality-group" style="display: none;">
+                                <label for="convert-quality-slider">Quality (<span id="convert-quality-value"></span>):</label>
+                                <input type="range" id="convert-quality-slider" min="0" max="100" value="92">
+                            </div>
+                            <button id="convert-preview-btn">Preview Conversion</button>
+                            <div id="convert-preview-output" class="utility-output" style="max-height: 200px;"></div>
+                            <button id="convert-apply-btn" disabled class="button-warning">Apply Conversion (Irreversible)</button>
+                            <p id="convert-status"></p>
                         </div>
                     </details>
                 </section>

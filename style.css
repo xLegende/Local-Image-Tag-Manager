@@ -288,6 +288,7 @@ header h1 {
 }
 .form-group input[type="text"],
 .form-group input[type="password"],
+.form-group input[type="number"],
 .form-group select,
 .form-group textarea {
   width: calc(100% - 12px); /* Account for padding */
@@ -307,6 +308,7 @@ header h1 {
   vertical-align: middle;
 }
 .form-group input[type="text"]::placeholder,
+.form-group input[type="number"]::placeholder,
 .form-group textarea::placeholder {
   color: color-mix(in srgb, var(--input-text-color) 60%, transparent);
 }
@@ -339,6 +341,7 @@ button:disabled {
 #batch-edit-selection-btn:not(:disabled),
 #batch-editor-apply-btn,
 #rule-editor-save-btn,
+#unify-preview-btn,
 #bulk-apply-custom-rules-btn:not(:disabled) {
   background-color: var(--button-primary-bg);
   color: var(--button-primary-text-color);
@@ -351,23 +354,27 @@ button:disabled {
 #batch-edit-selection-btn:hover:not(:disabled),
 #batch-editor-apply-btn:hover:not(:disabled),
 #rule-editor-save-btn:hover:not(:disabled),
+#unify-preview-btn:hover:not(:disabled),
 #bulk-apply-custom-rules-btn:hover:not(:disabled) {
   background-color: var(--button-primary-hover-bg);
   border-color: var(--button-primary-hover-bg);
 }
 
 #empty-trash-btn:not(:disabled),
-#batch-editor-move-to-trash-btn:not(:disabled) { /* Danger action */
+#unify-apply-btn:not(:disabled), /* Warning/Danger actions */
+#batch-editor-move-to-trash-btn:not(:disabled) {
   background-color: var(--button-danger-bg);
-  color: var(--button-primary-text-color); /* Keep text white for danger */
+  color: var(--button-primary-text-color);
   border-color: var(--button-danger-bg);
 }
 #empty-trash-btn:hover:not(:disabled),
+#unify-apply-btn:hover:not(:disabled),
 #batch-editor-move-to-trash-btn:hover:not(:disabled) {
   background-color: var(--button-danger-hover-bg);
   border-color: var(--button-danger-hover-bg);
 }
-button.delete-rule-btn {
+
+button.delete-rule-btn { /* Specific danger button */
   background-color: var(--button-danger-bg);
   color: var(--button-primary-text-color);
   border-color: var(--button-danger-bg);
@@ -744,13 +751,18 @@ body.dark-mode .tag-suggestions-container {
 
 #editor-status,
 #batch-editor-status,
-#rule-editor-status {
+#rule-editor-status,
+#unify-status {
   margin-top: 10px;
   font-style: italic;
   color: var(--success-color); /* Default to success */
   min-height: 1.2em;
-  text-align: center;
+  text-align: left; /* Match other statuses */
 }
+#unify-status { /* Specific for unification status */
+    text-align: center; /* Or keep left if preferred */
+}
+
 
 /* Batch Editor Modal Specifics */
 #batch-editor-modal .modal-content {
@@ -846,21 +858,29 @@ body.dark-mode .tag-suggestions-container {
 #tag-frequency-search + #tag-frequency-list { /* Space after search */
     margin-top: 5px;
 }
-#tag-frequency-list div {
+.tag-frequency-item { /* New class for each row */
   display: flex;
   justify-content: space-between;
+  align-items: center;
   padding: 3px 5px;
   border-radius: 2px;
 }
-#tag-frequency-list div:nth-child(odd) {
+.tag-frequency-item:nth-child(odd) {
   background-color: color-mix(
     in srgb,
     var(--bg-color) 85%,
     var(--container-bg)
   );
 }
-#tag-frequency-list span:first-child { /* Tag name */
-  max-width: 70%;
+.tag-frequency-item .tag-info {
+    flex-grow: 1;
+    display: flex;
+    justify-content: space-between;
+    margin-right: 8px;
+    overflow: hidden; /* Prevent long tag names from pushing buttons out */
+}
+.tag-frequency-item .tag-info .tag-name {
+  max-width: 75%; /* Adjust as needed */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -869,14 +889,51 @@ body.dark-mode .tag-suggestions-container {
   text-decoration-color: transparent;
   transition: text-decoration-color 0.2s ease;
 }
-#tag-frequency-list span:first-child:hover {
+.tag-frequency-item .tag-info .tag-name:hover {
   text-decoration-color: var(--link-color);
   background-color: var(--tag-frequency-clickable-hover-bg);
 }
-#tag-frequency-list span:last-child { /* Count */
+.tag-frequency-item .tag-info .tag-count {
   font-weight: bold;
   color: var(--link-color);
+  margin-left: 5px; /* Space between name and count */
+  white-space: nowrap;
 }
+.tag-frequency-item .tag-actions {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0; /* Prevent buttons from shrinking */
+}
+.tag-frequency-item .tag-actions button {
+  font-size: 0.8em;
+  padding: 2px 5px;
+  margin-left: 3px;
+  margin-top: 0; /* Override global button margin */
+}
+
+/* Common style for small action buttons */
+.small-action-btn {
+  /* Add any common styling here if needed, like border-radius, etc. */
+}
+.small-action-btn.danger-btn {
+  background-color: var(--button-danger-bg);
+  color: var(--button-primary-text-color);
+  border-color: var(--button-danger-bg);
+}
+.small-action-btn.danger-btn:hover:not(:disabled) {
+  background-color: var(--button-danger-hover-bg);
+  border-color: var(--button-danger-hover-bg);
+}
+.small-action-btn.warning-btn {
+  background-color: var(--button-warning-bg);
+  color: var(--button-warning-text-color);
+  border-color: var(--button-warning-bg);
+}
+.small-action-btn.warning-btn:hover:not(:disabled) {
+  background-color: var(--button-warning-hover-bg);
+  border-color: var(--button-warning-hover-bg);
+}
+
 
 /* Utility Outputs (was duplicate-files-output) */
 .utility-output {
@@ -900,6 +957,7 @@ body.dark-mode .tag-suggestions-container {
 .utility-output li {
   list-style-type: disc;
   margin-left: 20px;
+  word-break: break-all; /* Ensure long paths/names wrap */
 }
 .utility-output .tag-group {
     margin-bottom: 8px;

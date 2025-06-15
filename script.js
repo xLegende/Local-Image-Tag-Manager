@@ -32,6 +32,28 @@ document.addEventListener('DOMContentLoaded', () => {
     const caseInconsistentOutput = document.getElementById('case-inconsistent-output');
     const exportUniqueTagsBtn = document.getElementById('export-unique-tags-btn');
 
+    // Unification DOM Elements
+    const unifyPrefixInput = document.getElementById('unify-prefix');
+    const unifyStartNumInput = document.getElementById('unify-start-number');
+    const unifyPadZerosCheckbox = document.getElementById('unify-pad-zeros');
+    const unifyPaddingLengthGroup = document.getElementById('unify-padding-length-group');
+    const unifyPaddingLengthInput = document.getElementById('unify-padding-length');
+    const unifyPreviewBtn = document.getElementById('unify-preview-btn');
+    const unifyPreviewOutput = document.getElementById('unify-preview-output');
+    const unifyApplyBtn = document.getElementById('unify-apply-btn');
+    const unifyStatus = document.getElementById('unify-status');
+
+    // Image Format Conversion DOM Elements
+    const convertFormatSelect = document.getElementById('convert-format-select');
+    const convertQualityGroup = document.getElementById('convert-quality-group');
+    const convertQualitySlider = document.getElementById('convert-quality-slider');
+    const convertQualityValue = document.getElementById('convert-quality-value');
+    const convertPreviewBtn = document.getElementById('convert-preview-btn');
+    const convertPreviewOutput = document.getElementById('convert-preview-output');
+    const convertApplyBtn = document.getElementById('convert-apply-btn');
+    const convertStatus = document.getElementById('convert-status');
+
+
     const statsTotalImages = document.getElementById('stat-total-images');
     const statsUniqueTags = document.getElementById('stat-unique-tags');
     const statsModifiedImages = document.getElementById('stat-modified-images');
@@ -97,7 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let datasetHandle = null;
     // Holds { imageHandle, tagHandle, imageName, relativePath, imageUrl, tags, originalTags, modified, id, fileSize, lastModified, imageWidth, imageHeight, isTrashed }
     let allImageData = []; 
-    let allFileSystemEntries = new Map();
+    let allFileSystemEntries = new Map(); // Stores { handle, kind, name } for all scanned entries, keyed by full relative path
     let displayedImageDataIndices = []; // Indices into allImageData
     let currentEditIndex = -1; // Index in allImageData
     let currentEditOriginalTagsString = '';
@@ -120,6 +142,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let customRules = [];
     let editingRuleId = null;
 
+    let unificationPreviewData = []; // Stores { itemId, oldImageName, newImageName, oldTagName, newTagName, relativePath }
+    let conversionPreviewData = []; // Stores { itemId, oldImageName, newImageName, oldTagName, newTagName, relativePath, targetFormat, quality }
+
+
     const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif'];
     const TAG_EXTENSION = '.txt';
     const THEME_STORAGE_KEY = 'imageTagManagerTheme';
@@ -139,6 +165,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function escapeHtml(unsafe) {
+        if (typeof unsafe !== 'string') return '';
         return unsafe
              .replace(/&/g, "&amp;")
              .replace(/</g, "&lt;")
@@ -230,12 +257,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (IMAGE_EXTENSIONS.includes(ext)) {
                         pair.imageHandle = entry;
                         pair.originalImageName = entry.name; 
-                    } else if (ext === TAG_EXTENSION) {
+                    } else if (ext === TAG_EXTENSION || entry.name.endsWith(TAG_EXTENSION)) { // Also catch .png.txt etc
                         pair.tagHandle = entry;
                         pair.originalTagName = entry.name;
                     }
                     
-                    if (IMAGE_EXTENSIONS.includes(ext) || ext === TAG_EXTENSION) {
+                    if (IMAGE_EXTENSIONS.includes(ext) || ext === TAG_EXTENSION || entry.name.endsWith(TAG_EXTENSION)) {
                          fileHandlesMap.set(mapKey, pair);
                     }
 
@@ -288,7 +315,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     let originalTags = '';
                     let tagHandle = pair.tagHandle;
                     
-                    const imageNameForRecord = pair.originalImageName.substring(0, pair.originalImageName.lastIndexOf('.'));
+                    // Ensure imageName is just the base, without any extension.
+                    const lastDotIndex = pair.originalImageName.lastIndexOf('.');
+                    const imageNameForRecord = lastDotIndex > -1 ? pair.originalImageName.substring(0, lastDotIndex) : pair.originalImageName;
+
 
                     if (tagHandle) {
                         try {
@@ -314,11 +344,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         });
 
                         allImageData.push({
-                            imageHandle: pair.imageHandle,
-                            tagHandle: tagHandle,
-                            imageName: imageNameForRecord, 
-                            originalFullImageName: pair.originalImageName, 
-                            originalFullTagName: pair.originalTagName, 
+                            imageHandle: pair.imageHandle, 
+                            tagHandle: tagHandle,           
+                            imageName: imageNameForRecord, // Base name without extension
+                            originalFullImageName: pair.originalImageName, // Full name with original extension
+                            originalFullTagName: pair.originalTagName, // Full original tag name, if exists
                             relativePath: pair.relativePath,
                             imageUrl: imageUrl,
                             tags: tags,
@@ -329,9 +359,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             lastModified: imageFile.lastModified,
                             imageWidth: dimensions.width,
                             imageHeight: dimensions.height,
-                            isTrashed: false, // New property for trash system
+                            isTrashed: false, 
                         });
-                        // Initial tag stats update only considers non-trashed items, so this is fine
                         updateTagStats(tags, [], true); 
                     } catch (e) {
                         console.warn(`Image processing error for ${imageNameForRecord}: ${e.message}`);
@@ -344,7 +373,7 @@ document.addEventListener('DOMContentLoaded', () => {
             displayedImageDataIndices = getActiveItems().map(item => allImageData.indexOf(item));
             currentSortProperty = sortPropertySelect.value;
             currentSortOrder = sortOrderSelect.value;
-            sortAndRender(); // This will internally use getActiveItems for display
+            sortAndRender(); 
             updateSaveAllButtonState();
             updateEmptyTrashButtonState();
         } catch (error) {
@@ -369,13 +398,15 @@ document.addEventListener('DOMContentLoaded', () => {
         uniqueTags.clear();
         imageGrid.innerHTML = '';
         tagFrequencySearchInput.value = '';
-        updateStatisticsDisplay(); // Will show 0s
+        updateStatisticsDisplay(); 
         updateDisplayedCount();
         updateSaveAllButtonState();
         updateEmptyTrashButtonState();
         duplicateFilesOutput.innerHTML = '';
         orphanedMissingOutput.innerHTML = '';
         caseInconsistentOutput.innerHTML = '';
+        unifyPreviewOutput.innerHTML = ''; unifyApplyBtn.disabled = true; unifyStatus.textContent = ''; unificationPreviewData = [];
+        convertPreviewOutput.innerHTML = ''; convertApplyBtn.disabled = true; convertStatus.textContent = ''; conversionPreviewData = [];
         currentEditIndex = -1;
         nextItemId = 0;
         currentSortProperty = 'path';
@@ -432,29 +463,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
         displayedImageDataIndices.forEach((globalIndex, displayIndex) => {
             const item = allImageData[globalIndex];
-            if (!item) return; // Should not happen if displayedImageDataIndices is correct
+            if (!item) return; 
 
             const div = document.createElement('div');
             div.classList.add('grid-item');
-            div.dataset.globalIndex = globalIndex; // Store global index for easier lookup
-            div.dataset.displayIndex = displayIndex; // Store current display index
+            div.dataset.globalIndex = globalIndex; 
+            div.dataset.displayIndex = displayIndex; 
             div.id = item.id;
 
             if (item.modified) div.classList.add('modified');
             if (item.isTrashed) div.classList.add('trashed-item');
             if (selectedItemIds.has(item.id)) div.classList.add('selected');
 
-            div.tabIndex = -1; // For focus management, though actual focus handled by keyboard-focus class
-            div.style.outline = 'none'; // Remove default focus outline
+            div.tabIndex = -1; 
+            div.style.outline = 'none'; 
 
             div.addEventListener('click', (e) => handleGridItemInteraction(e, item.id, globalIndex, displayIndex));
 
-            // Action button (Move to Trash / Restore)
             const actionBtn = document.createElement('span');
             actionBtn.classList.add('image-action-btn');
             if (item.isTrashed) {
                 actionBtn.classList.add('restore-btn');
-                actionBtn.textContent = '♻'; // Restore icon (or text)
+                actionBtn.textContent = '♻'; 
                 actionBtn.title = `Restore "${item.originalFullImageName}" from trash`;
                 actionBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
@@ -462,7 +492,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             } else {
                 actionBtn.classList.add('move-to-trash-btn');
-                actionBtn.textContent = '×'; // Delete icon
+                actionBtn.textContent = '×'; 
                 const deleteTitle = item.relativePath ? `Move "${item.relativePath}/${item.originalFullImageName}" to trash` : `Move "${item.originalFullImageName}" to trash`;
                 actionBtn.title = deleteTitle;
                 actionBtn.addEventListener('click', (e) => {
@@ -482,7 +512,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const tagsDiv = document.createElement('div');
             tagsDiv.classList.add('tags');
-            renderTagsForItem(tagsDiv, item); // Pass item itself
+            renderTagsForItem(tagsDiv, item); 
             div.appendChild(tagsDiv);
 
             fragment.appendChild(div);
@@ -495,19 +525,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function handleGridItemInteraction(event, itemId, globalItemIndex, displayItemIndex) {
         const item = allImageData[globalItemIndex];
-        if (!item) return; // Should not happen
+        if (!item) return; 
 
-        // Clicking on the image of a non-trashed item, if it's the only selected item, opens editor
         const isImageClick = event.target.tagName === 'IMG';
         const canOpenEditor = !item.isTrashed && isImageClick;
 
         if (event.shiftKey && lastInteractedItemId && lastInteractedItemId !== itemId) {
-            // Find display indices for range selection
             const lastInteractedGlobalIndex = findIndexById(lastInteractedItemId);
             const lastInteractedDisplayIndex = displayedImageDataIndices.indexOf(lastInteractedGlobalIndex);
             const currentDisplayIndex = displayItemIndex;
 
-            if (lastInteractedDisplayIndex === -1 || currentDisplayIndex === -1) { // One of them isn't in current display
+            if (lastInteractedDisplayIndex === -1 || currentDisplayIndex === -1) { 
                 const wasSelected = selectedItemIds.has(itemId);
                 const wasOnlySelection = wasSelected && selectedItemIds.size === 1;
                 if(wasOnlySelection) {
@@ -516,45 +544,44 @@ document.addEventListener('DOMContentLoaded', () => {
                     lastInteractedItemId = null;
                 } else {
                     clearSelection();
-                    if (!item.isTrashed) addSelection(itemId); // Only select non-trashed
+                    if (!item.isTrashed) addSelection(itemId); 
                     lastInteractedItemId = item.isTrashed ? null : itemId;
                 }
             } else {
                 const start = Math.min(lastInteractedDisplayIndex, currentDisplayIndex);
                 const end = Math.max(lastInteractedDisplayIndex, currentDisplayIndex);
 
-                if (!(event.ctrlKey || event.metaKey)) { // If not holding Ctrl/Cmd, clear previous selection
+                if (!(event.ctrlKey || event.metaKey)) { 
                     clearSelection();
                 }
                 for (let i = start; i <= end; i++) {
                     const gIdx = displayedImageDataIndices[i];
-                    if (allImageData[gIdx] && !allImageData[gIdx].isTrashed) { // Only select non-trashed
+                    if (allImageData[gIdx] && !allImageData[gIdx].isTrashed) { 
                         addSelection(allImageData[gIdx].id);
                     }
                 }
             }
         } else if (event.ctrlKey || event.metaKey) {
-            if (!item.isTrashed) toggleSelection(itemId); // Only select non-trashed
+            if (!item.isTrashed) toggleSelection(itemId); 
             lastInteractedItemId = item.isTrashed ? null : itemId;
-        } else { // Simple click
+        } else { 
             const wasSelected = selectedItemIds.has(itemId);
             const wasOnlySelection = wasSelected && selectedItemIds.size === 1;
 
-            if (wasOnlySelection) { // Clicked on the only selected item
+            if (wasOnlySelection) { 
                 selectedItemIds.delete(itemId);
                 document.getElementById(itemId)?.classList.remove('selected');
                 lastInteractedItemId = null;
-                // Do not open editor if deselecting
             } else {
                 clearSelection();
                 if (!item.isTrashed) {
                     addSelection(itemId);
                     lastInteractedItemId = itemId;
-                    if (canOpenEditor) { // Open editor only if it's a fresh, single selection via image click
+                    if (canOpenEditor) { 
                          openEditor(itemId);
                     }
                 } else {
-                    lastInteractedItemId = null; // Cannot select trashed item
+                    lastInteractedItemId = null; 
                 }
             }
         }
@@ -564,7 +591,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function toggleSelection(itemId) {
         const element = document.getElementById(itemId);
         const item = allImageData[findIndexById(itemId)];
-        if (item && item.isTrashed) return; // Do not select trashed items
+        if (item && item.isTrashed) return; 
 
         if (selectedItemIds.has(itemId)) {
             selectedItemIds.delete(itemId);
@@ -578,7 +605,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function addSelection(itemId) {
         const element = document.getElementById(itemId);
         const item = allImageData[findIndexById(itemId)];
-        if (item && item.isTrashed) return; // Do not select trashed items
+        if (item && item.isTrashed) return; 
 
         if (!selectedItemIds.has(itemId)) {
             selectedItemIds.add(itemId);
@@ -601,7 +628,7 @@ document.addEventListener('DOMContentLoaded', () => {
         batchEditSelectionBtn.disabled = count === 0;
     }
 
-    function renderTagsForItem(tagsContainer, item) { // item is the full data object
+    function renderTagsForItem(tagsContainer, item) { 
         tagsContainer.innerHTML = '';
         if (item.tags.length === 0) {
             tagsContainer.textContent = '(no tags)';
@@ -611,13 +638,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 tagSpan.classList.add('tag');
                 tagSpan.textContent = tag;
 
-                if (!item.isTrashed) { // Only add delete button for non-trashed items
+                if (!item.isTrashed) { 
                     const deleteBtn = document.createElement('span');
                     deleteBtn.classList.add('tag-delete-btn');
                     deleteBtn.textContent = '×';
                     deleteBtn.title = `Remove tag "${tag}"`;
                     deleteBtn.addEventListener('click', (e) => {
-                        e.stopPropagation(); // Prevent grid item click
+                        e.stopPropagation(); 
                         removeTagFromImage(item.id, tag);
                     });
                     tagSpan.appendChild(deleteBtn);
@@ -629,11 +656,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateDisplayedCount() {
         const activeItemsCount = getActiveItems().length;
-        displayedCountSpan.textContent = displayedImageDataIndices.length; // Number of items currently in the grid
-        totalCountSpan.textContent = activeItemsCount; // Total non-trashed items in the dataset
+        displayedCountSpan.textContent = displayedImageDataIndices.length; 
+        totalCountSpan.textContent = activeItemsCount; 
     }
 
-    function recalculateAllTagStats() { // Operates on active items
+    function recalculateAllTagStats() { 
         tagFrequencies.clear();
         uniqueTags.clear();
         getActiveItems().forEach(item => {
@@ -648,7 +675,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStatisticsDisplay();
     }
 
-    function updateTagStatsIncremental(addedTags, removedTags) { // Assumes called for an active item
+    function updateTagStatsIncremental(addedTags, removedTags) { 
         const add = addedTags.map(t => t.trim()).filter(t => t);
         const rem = removedTags.map(t => t.trim()).filter(t => t);
         rem.forEach(tag => {
@@ -666,41 +693,43 @@ document.addEventListener('DOMContentLoaded', () => {
             tagFrequencies.set(tag, (tagFrequencies.get(tag) || 0) + 1);
             uniqueTags.add(tag);
         });
-        // No need to call updateStatisticsDisplay here, usually called by parent
     }
 
     function updateTagStats(addedTags, removedTags, isInitialLoad = false) {
-        // For initial load, we build up from scratch. For incremental, we adjust.
-        if (isInitialLoad) { // During dataset load, items are not yet trashed
+        if (isInitialLoad) { 
             addedTags.map(t => t.trim()).filter(t => t).forEach(tag => {
                 tagFrequencies.set(tag, (tagFrequencies.get(tag) || 0) + 1);
                 uniqueTags.add(tag);
             });
-        } else { // Incremental update (e.g., after tag edit) - assumes item is active
+        } else { 
             updateTagStatsIncremental(addedTags, removedTags);
         }
-        // updateStatisticsDisplay will be called by the caller (e.g., loadDataset, saveEditorChanges)
     }
 
 
     function updateStatisticsDisplay() {
         const activeItems = getActiveItems();
         statsTotalImages.textContent = activeItems.length;
-        statsUniqueTags.textContent = uniqueTags.size; // uniqueTags is already based on active items via recalculateAllTagStats
+        statsUniqueTags.textContent = uniqueTags.size;
         statsModifiedImages.textContent = activeItems.filter(item => item.modified).length;
 
         tagFrequencyList.innerHTML = '';
         const searchTerm = tagFrequencySearchInput.value.trim().toLowerCase();
-        // tagFrequencies should already be based on active items
         const filteredFrequencies = [...tagFrequencies.entries()].filter(([t]) => !searchTerm || t.toLowerCase().includes(searchTerm));
         const sortedTags = filteredFrequencies.sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]));
 
         if (sortedTags.length === 0) {
-            tagFrequencyList.innerHTML = `<div><span>${searchTerm ? 'No active tags match search.' : 'No active tags loaded.'}</span></div>`;
+            tagFrequencyList.innerHTML = `<div class="tag-frequency-item"><span>${searchTerm ? 'No active tags match search.' : 'No active tags loaded.'}</span></div>`;
         } else {
             sortedTags.forEach(([tag, count]) => {
                 const div = document.createElement('div');
+                div.classList.add('tag-frequency-item');
+
+                const tagInfoDiv = document.createElement('div');
+                tagInfoDiv.classList.add('tag-info');
+
                 const spanT = document.createElement('span');
+                spanT.classList.add('tag-name');
                 spanT.textContent = tag;
                 spanT.title = `Click to search for: ${tag}`;
                 spanT.addEventListener('click', () => {
@@ -713,14 +742,42 @@ document.addEventListener('DOMContentLoaded', () => {
                     filterBtn.click();
                     searchTagsInput.focus();
                 });
+                tagInfoDiv.appendChild(spanT);
+
                 const spanC = document.createElement('span');
+                spanC.classList.add('tag-count');
                 spanC.textContent = count;
-                div.appendChild(spanT);
-                div.appendChild(spanC);
+                tagInfoDiv.appendChild(spanC);
+                div.appendChild(tagInfoDiv);
+
+                const actionsDiv = document.createElement('div');
+                actionsDiv.classList.add('tag-actions');
+
+                const deleteBtn = document.createElement('button');
+                deleteBtn.textContent = 'Del';
+                deleteBtn.title = `Delete all occurrences of "${tag}" from active images`;
+                deleteBtn.classList.add('small-action-btn', 'danger-btn');
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    handleDeleteTagFromFrequencyList(tag);
+                });
+                actionsDiv.appendChild(deleteBtn);
+
+                const renameBtn = document.createElement('button');
+                renameBtn.textContent = 'Ren';
+                renameBtn.title = `Rename all occurrences of "${tag}" in active images`;
+                renameBtn.classList.add('small-action-btn', 'warning-btn');
+                renameBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    handleRenameTagFromFrequencyList(tag);
+                });
+                actionsDiv.appendChild(renameBtn);
+                div.appendChild(actionsDiv);
+
                 tagFrequencyList.appendChild(div);
             });
         }
-        updateDisplayedCount(); // Ensure grid header count is also up-to-date
+        updateDisplayedCount();
     }
 
     function updateSaveAllButtonState() {
@@ -737,12 +794,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function sortAndRender() {
         clearKeyboardFocus();
-        // Sort displayedImageDataIndices, which should already point to correct items from allImageData
         displayedImageDataIndices.sort((indexA, indexB) => {
             const itemA = allImageData[indexA];
             const itemB = allImageData[indexB];
             let comparison = 0;
-            if (!itemA || !itemB) return 0; // Should not happen with valid indices
+            if (!itemA || !itemB) return 0; 
 
             switch (currentSortProperty) {
                 case 'filename':
@@ -790,7 +846,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         updateStatus('Filtering...', true, true);
         requestAnimationFrame(() => {
-            // Determine the base pool of items to filter from
             let baseItemsPoolIndices;
             if (filterMode === 'trashed') {
                 baseItemsPoolIndices = allImageData.map((item, i) => item.isTrashed ? i : -1).filter(i => i !== -1);
@@ -803,41 +858,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!item) return false; 
 
                 let include = true;
-                // Apply specific non-trash filters only if not in "trashed" mode
                 if (filterMode !== 'trashed') {
                     switch (filterMode) {
-                        case 'tagged':
-                            if (item.tags.length === 0) include = false;
-                            break;
-                        case 'untagged':
-                            if (item.tags.length > 0) include = false;
-                            break;
-                        case 'modified':
-                            if (!item.modified) include = false;
-                            break;
-                        // 'all' (active) means no further filtering here based on these criteria
+                        case 'tagged': if (item.tags.length === 0) include = false; break;
+                        case 'untagged': if (item.tags.length > 0) include = false; break;
+                        case 'modified': if (!item.modified) include = false; break;
                     }
                 }
                 if (!include) return false;
 
-                // Apply search term filters
                 if (searchTermsRaw.length > 0) {
                     const itemTagsLower = item.tags.map(t => t.toLowerCase());
                     if (searchMode === 'AND') {
                         include = searchTermsRaw.every(term => itemTagsLower.some(tag => tag.includes(term.toLowerCase())));
-                    } else { // OR mode
+                    } else { 
                         include = searchTermsRaw.some(term => itemTagsLower.some(tag => tag.includes(term.toLowerCase())));
                     }
                 }
                 if (!include) return false;
 
-                // Apply exclude term filters
                 if (excludeTerms.length > 0) {
                     include = !excludeTerms.some(term => item.tags.includes(term));
                 }
                 return include;
             });
-            sortAndRender(); // This will render the filtered and sorted displayedImageDataIndices
+            sortAndRender(); 
         });
     }
 
@@ -846,16 +891,17 @@ document.addEventListener('DOMContentLoaded', () => {
         searchTagsInput.value = '';
         excludeTagsInput.value = '';
         searchModeSelect.value = 'AND';
-        filterUntaggedSelect.value = 'all'; // Default to 'all active'
+        filterUntaggedSelect.value = 'all'; 
         duplicateFilesOutput.innerHTML = '';
         orphanedMissingOutput.innerHTML = '';
         caseInconsistentOutput.innerHTML = '';
+        unifyPreviewOutput.innerHTML = ''; unifyApplyBtn.disabled = true; unifyStatus.textContent = '';
+        convertPreviewOutput.innerHTML = ''; convertApplyBtn.disabled = true; convertStatus.textContent = '';
         currentSortProperty = 'path';
         sortPropertySelect.value = currentSortProperty;
         currentSortOrder = 'asc';
         sortOrderSelect.value = currentSortOrder;
         
-        // Reset displayedImageDataIndices to all active items
         displayedImageDataIndices = getActiveItems().map(item => allImageData.indexOf(item));
         sortAndRender();
     }
@@ -866,7 +912,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function openEditor(itemId) {
-        const index = findIndexById(itemId); // index in allImageData
+        const index = findIndexById(itemId); 
         if (index === -1) {
             updateStatus("Error: Item not found for single editor.");
             return;
@@ -902,7 +948,6 @@ document.addEventListener('DOMContentLoaded', () => {
         metadataHTML += `  |  Modified: ${new Date(item.lastModified).toLocaleDateString()}`;
         editorMetadataDisplay.innerHTML = metadataHTML;
         editorTagsTextarea.value = joinTags(item.tags);
-        // editorStatus already handled above for trashed items
         editorModal.classList.remove('hidden');
         updateEditorNavButtonStates();
         hideSuggestions();
@@ -916,12 +961,11 @@ document.addEventListener('DOMContentLoaded', () => {
         currentEditIndex = -1;
         currentEditOriginalTagsString = '';
         editorMetadataDisplay.innerHTML = '';
-        // Restore focus to grid item if applicable
         if (keyboardFocusIndex !== -1 && displayedImageDataIndices.length > keyboardFocusIndex) {
             const globalFocusedIndex = displayedImageDataIndices[keyboardFocusIndex];
             if (allImageData[globalFocusedIndex]) {
                  const focusedItemId = allImageData[globalFocusedIndex].id;
-                 document.getElementById(focusedItemId)?.focus(); // Re-focus grid item
+                 document.getElementById(focusedItemId)?.focus(); 
             }
         }
         hideSuggestions();
@@ -944,7 +988,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const newTagsStringFromTextarea = joinTags(newTagsFromTextarea);
 
         if (newTagsStringFromTextarea !== currentEditOriginalTagsString) {
-            const oldTagsForStatUpdate = parseTags(currentEditOriginalTagsString); // Tags before this edit session
+            const oldTagsForStatUpdate = parseTags(currentEditOriginalTagsString); 
             
             item.tags = newTagsFromTextarea;
             item.modified = true;
@@ -952,8 +996,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const addedForStatUpdate = newTagsFromTextarea.filter(t => !oldTagsForStatUpdate.includes(t));
             const removedForStatUpdate = oldTagsForStatUpdate.filter(t => !newTagsFromTextarea.includes(t));
             
-            updateTagStatsIncremental(addedForStatUpdate, removedForStatUpdate); // Update stats based on delta
-            recalculateAllTagStats(); // Recalculate global unique tags and frequencies
+            updateTagStatsIncremental(addedForStatUpdate, removedForStatUpdate); 
+            recalculateAllTagStats(); 
             
             const gridItem = document.getElementById(item.id);
             if (gridItem) {
@@ -963,7 +1007,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             editorStatus.textContent = 'Tags updated. Remember to "Save All Changes".';
             editorStatus.style.color = 'var(--success-color)';
-            currentEditOriginalTagsString = newTagsStringFromTextarea; // Update original for next comparison
+            currentEditOriginalTagsString = newTagsStringFromTextarea; 
             updateSaveAllButtonState();
             return true;
         } else {
@@ -992,7 +1036,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const index = findIndexById(itemId);
         if (index === -1) return;
         const item = allImageData[index];
-        if (item.isTrashed) return; // Cannot modify trashed items
+        if (item.isTrashed) return; 
 
         const oldLen = item.tags.length;
         const newTags = item.tags.filter(t => t !== tagToRemove);
@@ -1001,8 +1045,8 @@ document.addEventListener('DOMContentLoaded', () => {
             item.tags = newTags;
             item.modified = true;
             updateSaveAllButtonState();
-            updateTagStatsIncremental([], [tagToRemove]); // Update stats
-            recalculateAllTagStats(); // Recalculate global unique tags and frequencies
+            updateTagStatsIncremental([], [tagToRemove]); 
+            recalculateAllTagStats(); 
 
             const gridItem = document.getElementById(item.id);
             if (gridItem) {
@@ -1027,33 +1071,31 @@ document.addEventListener('DOMContentLoaded', () => {
         const index = findIndexById(itemId);
         if (index === -1) return;
         const item = allImageData[index];
-        if (item.isTrashed) return; // Already trashed
+        if (item.isTrashed) return; 
 
         item.isTrashed = true;
-        item.modified = false; // Trashing is not a "tag modification" for save all button
+        item.modified = false; 
 
-        // Update UI for the specific item
         const gridItemElement = document.getElementById(item.id);
         if (gridItemElement) {
             gridItemElement.classList.add('trashed-item');
-            gridItemElement.classList.remove('modified'); // Visually remove modified if it was, as it's now just "trashed"
+            gridItemElement.classList.remove('modified'); 
             const actionBtn = gridItemElement.querySelector('.image-action-btn');
             if (actionBtn) {
                 actionBtn.classList.remove('move-to-trash-btn');
                 actionBtn.classList.add('restore-btn');
                 actionBtn.textContent = '♻';
                 actionBtn.title = `Restore "${item.originalFullImageName}" from trash`;
-                actionBtn.replaceWith(actionBtn.cloneNode(true)); // Re-attach to clear old listeners
+                actionBtn.replaceWith(actionBtn.cloneNode(true)); 
                 gridItemElement.querySelector('.restore-btn').addEventListener('click', (e) => {
                     e.stopPropagation();
                     restoreFromTrash(item.id);
                 });
             }
             const tagsDiv = gridItemElement.querySelector('.tags');
-            if (tagsDiv) renderTagsForItem(tagsDiv, item); // Re-render tags to remove delete buttons
+            if (tagsDiv) renderTagsForItem(tagsDiv, item); 
         }
         
-        // If item was selected, deselect it as trashed items cannot be part of batch edits
         if (selectedItemIds.has(item.id)) {
             selectedItemIds.delete(item.id);
             gridItemElement?.classList.remove('selected');
@@ -1061,17 +1103,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (lastInteractedItemId === item.id) lastInteractedItemId = null;
 
-        // Recalculate stats and update counts
-        recalculateAllTagStats(); // This will exclude the newly trashed item
+        recalculateAllTagStats(); 
         updateEmptyTrashButtonState();
-        updateSaveAllButtonState(); // Ensure save button reflects actual tag modifications
+        updateSaveAllButtonState(); 
 
-        // If current view is not "Only Trashed", the item might disappear. Re-filter.
         if (filterUntaggedSelect.value !== 'trashed') {
-            filterAndSearch(); // Re-apply filters, which will hide the item if not showing trash
+            filterAndSearch(); 
         } else {
-             // If current view IS "Only Trashed", we still need to re-render the grid
-             // to show the item now correctly styled as trashed, or if sorting changed.
             sortAndRender();
         }
         updateStatus(`Moved "${item.originalFullImageName}" to trash.`);
@@ -1081,15 +1119,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const index = findIndexById(itemId);
         if (index === -1) return;
         const item = allImageData[index];
-        if (!item.isTrashed) return; // Not in trash
+        if (!item.isTrashed) return; 
 
         item.isTrashed = false;
-        // item.modified remains as it was before trashing (if it was modified for tags)
 
         const gridItemElement = document.getElementById(item.id);
         if (gridItemElement) {
             gridItemElement.classList.remove('trashed-item');
-            if(item.modified) gridItemElement.classList.add('modified'); // Re-add if it was modified
+            if(item.modified) gridItemElement.classList.add('modified'); 
 
             const actionBtn = gridItemElement.querySelector('.image-action-btn');
             if (actionBtn) {
@@ -1098,26 +1135,23 @@ document.addEventListener('DOMContentLoaded', () => {
                 actionBtn.textContent = '×';
                 const deleteTitle = item.relativePath ? `Move "${item.relativePath}/${item.originalFullImageName}" to trash` : `Move "${item.originalFullImageName}" to trash`;
                 actionBtn.title = deleteTitle;
-                actionBtn.replaceWith(actionBtn.cloneNode(true)); // Re-attach
+                actionBtn.replaceWith(actionBtn.cloneNode(true)); 
                 gridItemElement.querySelector('.move-to-trash-btn').addEventListener('click', (e) => {
                     e.stopPropagation();
                     promptMoveToTrash(item.id);
                 });
             }
              const tagsDiv = gridItemElement.querySelector('.tags');
-            if (tagsDiv) renderTagsForItem(tagsDiv, item); // Re-render tags to add delete buttons
+            if (tagsDiv) renderTagsForItem(tagsDiv, item); 
         }
 
-        recalculateAllTagStats(); // Will now include this item
+        recalculateAllTagStats(); 
         updateEmptyTrashButtonState();
         updateSaveAllButtonState();
 
-        // If current view is "Only Trashed", the item will disappear. Re-filter.
         if (filterUntaggedSelect.value === 'trashed') {
             filterAndSearch();
         } else {
-            // If current view is NOT "Only Trashed", we still need to re-render the grid
-            // to show the item now correctly styled as active, or if sorting changed.
             sortAndRender();
         }
         updateStatus(`Restored "${item.originalFullImageName}" from trash.`);
@@ -1147,36 +1181,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
             for (const item of itemsToDelete) {
                 let itemError = false;
-                // Delete image file
-                if (item.imageHandle) {
+                let parentDirHandle = datasetHandle;
+                if (item.relativePath) { // Navigate to subdirectory if path exists
                     try {
-                        let parentDirHandle = datasetHandle;
-                        if (item.relativePath) {
-                            const parts = item.relativePath.split('/');
-                            for (const p of parts) {
-                                if (p) parentDirHandle = await parentDirHandle.getDirectoryHandle(p, { create: false });
-                            }
+                        const parts = item.relativePath.split('/');
+                        for (const p of parts) {
+                            if (p) parentDirHandle = await parentDirHandle.getDirectoryHandle(p, { create: false });
                         }
-                        await parentDirHandle.removeEntry(item.imageHandle.name);
                     } catch (e) {
-                        console.error(`Error deleting image file ${item.originalFullImageName}:`, e);
+                        console.error(`Error accessing parent directory for ${item.originalFullImageName} in ${item.relativePath}:`, e);
+                        itemError = true; // Cannot access parent, cannot delete
+                    }
+                }
+                
+                if (!itemError && item.imageHandle) {
+                    try {
+                        await parentDirHandle.removeEntry(item.originalFullImageName); 
+                    } catch (e) {
+                        console.error(`Error deleting image file ${item.originalFullImageName} from ${parentDirHandle.name}:`, e);
                         itemError = true;
                     }
                 }
-                // Delete tag file
-                if (item.tagHandle) {
+                if (!itemError && item.tagHandle) {
                      try {
-                        let parentDirHandle = datasetHandle;
-                        if (item.relativePath) {
-                            const parts = item.relativePath.split('/');
-                            for (const p of parts) {
-                                if (p) parentDirHandle = await parentDirHandle.getDirectoryHandle(p, { create: false });
-                            }
-                        }
-                        await parentDirHandle.removeEntry(item.tagHandle.name);
+                        await parentDirHandle.removeEntry(item.originalFullTagName); 
                     } catch (e) {
-                        console.error(`Error deleting tag file ${item.originalFullTagName}:`, e);
-                        // Don't set itemError to true if image already failed, to avoid double counting error
+                        console.error(`Error deleting tag file ${item.originalFullTagName} from ${parentDirHandle.name}:`, e);
                         if (!itemError) itemError = true;
                     }
                 }
@@ -1185,23 +1215,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (permError) {
             updateStatus(`Permission error during deletion: ${permError.message}`);
-            // No full stop, try to update state as much as possible
         } finally {
-            // Update allImageData by removing all items marked isTrashed, regardless of FS operation success
-            // This ensures they are gone from the UI's perspective.
             const newAllImageData = allImageData.filter(item => !item.isTrashed);
-            //const actuallyRemovedCount = allImageData.length - newAllImageData.length; // Should match itemsToDelete.length
             allImageData = newAllImageData;
             
-            clearSelection(); // Clear any selections as items are gone
+            clearSelection(); 
             clearKeyboardFocus();
 
-            // Recalculate everything
             recalculateAllTagStats();
-            updateEmptyTrashButtonState(); // Will go to 0
+            updateEmptyTrashButtonState(); 
             updateSaveAllButtonState();
 
-            // Refresh the grid based on current filters
             filterAndSearch();
 
             updateStatus(`Permanently deleted ${deletedCount} item(s). ${errorCount > 0 ? `${errorCount} failed (see console).` : ''} Trash emptied.`, false);
@@ -1253,7 +1277,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         updateStatus(`${desc} on active images...`, true);
         let statsChanged = false;
-        activeItems.forEach((item) => { // Iterate only over active items
+        activeItems.forEach((item) => { 
             let origTagsString = joinTags(item.tags); 
             let currentTagsArray = [...item.tags];
             let itemChanged = false;
@@ -1273,7 +1297,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'add':
                     const uniqueTagsToAdd = toAdd.filter(t => !currentTagsArray.includes(t));
                     if (uniqueTagsToAdd.length > 0) {
-                        currentTagsArray = [...uniqueTagsToAdd, ...currentTagsArray]; // Add to beginning
+                        currentTagsArray = [...uniqueTagsToAdd, ...currentTagsArray]; 
                         itemChanged = true;
                     }
                     break;
@@ -1285,7 +1309,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     break;
             }
-            // Check if tags actually changed content-wise, not just order for non-duplicate ops
             if (itemChanged && operation !== 'removeDuplicates' && joinTags(currentTagsArray.slice().sort()) === joinTags(parseTags(origTagsString).slice().sort())) {
                 itemChanged = false; 
             }
@@ -1303,23 +1326,117 @@ document.addEventListener('DOMContentLoaded', () => {
             updateSaveAllButtonState();
             affectedIds.forEach(id => {
                 const gridItem = document.getElementById(id);
-                const itemData = allImageData.find(i => i.id === id); // Get from allImageData for rendering
+                const itemData = allImageData.find(i => i.id === id); 
                 if (gridItem && itemData) {
                     gridItem.classList.add('modified');
                     const tagsDiv = gridItem.querySelector('.tags');
                     if (tagsDiv) renderTagsForItem(tagsDiv, itemData);
                 }
             });
-            if (statsChanged) recalculateAllTagStats(); // Recalculate based on all active items
+            if (statsChanged) recalculateAllTagStats(); 
             updateStatus(`${modCount} active items affected by "${desc}". Save changes.`, false);
         } else {
             updateStatus(`Bulk op "${desc}" complete. No changes to active items.`, false);
         }
-        // Clear inputs
         if (operation === 'rename') { renameOldTagInput.value = ''; renameNewTagInput.value = ''; }
         if (operation === 'remove') removeTagNameInput.value = '';
         if (operation === 'add') addTriggerWordsInput.value = '';
     }
+
+    // --- Actions from Tag Frequency List ---
+    function handleDeleteTagFromFrequencyList(tagName) {
+        if (!tagName) return;
+        const activeItems = getActiveItems();
+        if (activeItems.length === 0) {
+            updateStatus("No active items to process."); return;
+        }
+        if (!confirm(`Are you sure you want to remove the tag "${tagName}" from ALL ${activeItems.length} active images where it appears?`)) {
+            updateStatus("Tag deletion cancelled."); return;
+        }
+
+        updateStatus(`Removing tag "${tagName}" from active images...`, true);
+        let modCount = 0;
+        const affectedIds = new Set();
+
+        activeItems.forEach(item => {
+            const initialLength = item.tags.length;
+            item.tags = item.tags.filter(t => t !== tagName);
+            if (item.tags.length < initialLength) {
+                item.modified = true;
+                modCount++;
+                affectedIds.add(item.id);
+            }
+        });
+
+        if (modCount > 0) {
+            updateSaveAllButtonState();
+            affectedIds.forEach(id => {
+                const gridItem = document.getElementById(id);
+                const itemData = allImageData.find(i => i.id === id);
+                if (gridItem && itemData) {
+                    gridItem.classList.add('modified');
+                    const tagsDiv = gridItem.querySelector('.tags');
+                    if (tagsDiv) renderTagsForItem(tagsDiv, itemData);
+                }
+            });
+            recalculateAllTagStats(); // This will also call updateStatisticsDisplay
+            updateStatus(`${modCount} active items affected by removing tag "${tagName}". Remember to Save All Changes.`, false);
+        } else {
+            updateStatus(`Tag "${tagName}" was not found in any active items. No changes made.`, false);
+            recalculateAllTagStats(); // Still good to refresh stats display in case something was off
+        }
+    }
+
+    function handleRenameTagFromFrequencyList(oldTagName) {
+        if (!oldTagName) return;
+        const activeItems = getActiveItems();
+        if (activeItems.length === 0) {
+            updateStatus("No active items to process."); return;
+        }
+        const newTagName = prompt(`Rename all occurrences of "${oldTagName}" to:`, oldTagName);
+        if (newTagName === null) { // User cancelled
+            updateStatus("Tag rename cancelled."); return;
+        }
+        const trimmedNewTagName = newTagName.trim();
+        if (!trimmedNewTagName || trimmedNewTagName === oldTagName) {
+            updateStatus("Invalid new tag name or no change specified. Rename cancelled."); return;
+        }
+        if (!confirm(`Are you sure you want to rename the tag "${oldTagName}" to "${trimmedNewTagName}" in ALL ${activeItems.length} active images where it appears?`)) {
+            updateStatus("Tag rename cancelled."); return;
+        }
+
+        updateStatus(`Renaming tag "${oldTagName}" to "${trimmedNewTagName}"...`, true);
+        let modCount = 0;
+        const affectedIds = new Set();
+
+        activeItems.forEach(item => {
+            if (item.tags.includes(oldTagName)) {
+                item.tags = [...new Set(item.tags.map(t => t === oldTagName ? trimmedNewTagName : t))];
+                item.modified = true;
+                modCount++;
+                affectedIds.add(item.id);
+            }
+        });
+
+        if (modCount > 0) {
+            updateSaveAllButtonState();
+            affectedIds.forEach(id => {
+                const gridItem = document.getElementById(id);
+                const itemData = allImageData.find(i => i.id === id);
+                if (gridItem && itemData) {
+                    gridItem.classList.add('modified');
+                    const tagsDiv = gridItem.querySelector('.tags');
+                    if (tagsDiv) renderTagsForItem(tagsDiv, itemData);
+                }
+            });
+            recalculateAllTagStats();
+            updateStatus(`${modCount} active items affected by renaming tag. Remember to Save All Changes.`, false);
+        } else {
+            updateStatus(`Tag "${oldTagName}" was not found in any active items. No changes made.`, false);
+            recalculateAllTagStats();
+        }
+    }
+
 
     // --- UTILITY FUNCTIONS (operate on active items by default) ---
     function findDuplicateTagFiles() {
@@ -1369,43 +1486,38 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function findOrphanedAndMissingTagFiles() { // This checks the entire filesystem entries vs allImageData
+    async function findOrphanedAndMissingTagFiles() { 
         if (!datasetHandle) {
             orphanedMissingOutput.innerHTML = '<p>Load dataset first.</p>'; return;
         }
         updateStatus('Checking for orphaned/missing tag files...', true);
-        const orphanedTagFiles = []; // Tag files on disk with no corresponding image in allImageData
-        const imagesMissingTagFiles = []; // Images in allImageData that don't have a tagHandle
-        const allLoadedImageBasePaths = new Set(); // Stores base_path/image_name (lowercase) for all images in allImageData
-        const allLoadedTagBasePaths = new Set();   // Stores base_path/tag_name (lowercase) for all tags in allImageData
+        const orphanedTagFiles = []; 
+        const imagesMissingTagFiles = []; 
+        const allLoadedImageBaseKeys = new Set(); // Key: relativePath/imageName (base name without ext)
+        const allLoadedTagFileFullNames = new Set(); // Key: relativePath/originalFullTagName
 
         allImageData.forEach(item => {
-            const imgBase = item.imageName.toLowerCase();
-            const imgFullPathKey = item.relativePath ? `${item.relativePath}/${imgBase}` : imgBase;
-            allLoadedImageBasePaths.add(imgFullPathKey);
+            const imgBaseKey = item.relativePath ? `${item.relativePath}/${item.imageName}` : item.imageName;
+            allLoadedImageBaseKeys.add(imgBaseKey);
             if (item.tagHandle) {
-                const tagBase = item.originalFullTagName.substring(0, item.originalFullTagName.lastIndexOf('.')).toLowerCase();
-                const tagFullPathKey = item.relativePath ? `${item.relativePath}/${tagBase}` : tagBase;
-                allLoadedTagBasePaths.add(tagFullPathKey);
-            } else if (!item.isTrashed) { // If it's an active image and has no tagHandle, it's missing a tag file
+                const tagFullNameKey = item.relativePath ? `${item.relativePath}/${item.originalFullTagName}` : item.originalFullTagName;
+                allLoadedTagFileFullNames.add(tagFullNameKey);
+            } else if (!item.isTrashed) { 
                  imagesMissingTagFiles.push(item.relativePath ? `${item.relativePath}/${item.originalFullImageName}` : item.originalFullImageName);
             }
         });
         
         for (const [fullPathOnDisk, entryInfo] of allFileSystemEntries.entries()) {
-            if (entryInfo.kind !== 'file') continue;
+            if (entryInfo.kind !== 'file' || !entryInfo.name.endsWith(TAG_EXTENSION)) continue;
 
-            const lowerCaseName = entryInfo.name.toLowerCase();
-            const ext = lowerCaseName.substring(lowerCaseName.lastIndexOf('.'));
-            const baseName = lowerCaseName.substring(0, lowerCaseName.lastIndexOf('.'));
-            const pathParts = fullPathOnDisk.split('/'); pathParts.pop(); 
-            const relativePath = pathParts.join('/');
-            const diskFileKey = relativePath ? `${relativePath}/${baseName}` : baseName;
+            const diskFileKey = fullPathOnDisk.substring(0, fullPathOnDisk.lastIndexOf(TAG_EXTENSION)); // e.g. "sub/image.png" or "sub/image"
+            const diskFileKeyWithoutImgExt = diskFileKey.substring(0, diskFileKey.lastIndexOf('.')) !== -1 ? diskFileKey.substring(0, diskFileKey.lastIndexOf('.')) : diskFileKey;
 
-            if (ext === TAG_EXTENSION) { // Found a .txt file on disk
-                if (!allLoadedImageBasePaths.has(diskFileKey)) { // No corresponding image loaded in our app
-                    orphanedTagFiles.push(fullPathOnDisk);
-                }
+            // An orphaned tag file could be:
+            // 1. "image.txt" where no "image.any_image_ext" exists.
+            // 2. "image.png.txt" where no "image.png" exists.
+            if (!allLoadedImageBaseKeys.has(diskFileKey) && !allLoadedImageBaseKeys.has(diskFileKeyWithoutImgExt)) { 
+                orphanedTagFiles.push(fullPathOnDisk);
             }
         }
 
@@ -1414,7 +1526,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (imagesMissingTagFiles.length > 0) {
             foundAny = true;
             const p = document.createElement('p');
-            p.textContent = `Active images missing tag files (${imagesMissingTagFiles.length}):`;
+            p.textContent = `Active images missing expected tag files (e.g., basename.txt) (${imagesMissingTagFiles.length}):`;
             orphanedMissingOutput.appendChild(p);
             const ul = document.createElement('ul');
             imagesMissingTagFiles.sort().forEach(filePath => {
@@ -1425,7 +1537,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (orphanedTagFiles.length > 0) {
             foundAny = true;
             const p = document.createElement('p');
-            p.textContent = `Orphaned tag files on disk (no matching image loaded) (${orphanedTagFiles.length}):`;
+            p.textContent = `Orphaned tag files on disk (no matching image loaded or tag filename mismatch) (${orphanedTagFiles.length}):`;
             orphanedMissingOutput.appendChild(p);
             const ul = document.createElement('ul');
             orphanedTagFiles.sort().forEach(filePath => {
@@ -1434,12 +1546,12 @@ document.addEventListener('DOMContentLoaded', () => {
             orphanedMissingOutput.appendChild(ul);
         }
         if (!foundAny) {
-            orphanedMissingOutput.innerHTML = '<p>No orphaned or missing tag files found according to current data load.</p>';
+            orphanedMissingOutput.innerHTML = '<p>No orphaned or missing tag files found according to current data load and naming conventions.</p>';
         }
         updateStatus('Orphaned/missing tag file check complete.', false);
     }
 
-    function findCaseInconsistentTags() { // Uses uniqueTags, which is based on active items
+    function findCaseInconsistentTags() { 
         if (uniqueTags.size < 2) {
             caseInconsistentOutput.innerHTML = '<p>Not enough unique tags from active items to compare.</p>';
             return;
@@ -1483,7 +1595,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function exportUniqueTagList() { // Uses uniqueTags, based on active items
+    function exportUniqueTagList() { 
         if (uniqueTags.size === 0) {
             updateStatus("No unique tags from active items to export."); return;
         }
@@ -1499,14 +1611,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 
-    async function saveAllChanges() { // Saves tag modifications for active items
+    async function saveAllChanges() { 
         if (!datasetHandle) {
             updateStatus("No dataset loaded."); return;
         }
         const itemsToSave = getActiveItems().filter(item => item.modified);
         if (itemsToSave.length === 0) {
             updateStatus("No tag modifications on active items to save.");
-            updateSaveAllButtonState(); // Should disable it
+            updateSaveAllButtonState(); 
             return;
         }
         let savedCount = 0, errorCount = 0;
@@ -1515,20 +1627,32 @@ document.addEventListener('DOMContentLoaded', () => {
             if (await datasetHandle.queryPermission({ mode: 'readwrite' }) !== 'granted' &&
                 await datasetHandle.requestPermission({ mode: 'readwrite' }) !== 'granted') {
                 updateStatus('Error: Write permission denied. Cannot save tags.');
-                return; // Do not disable save button here, user might retry
+                return; 
             }
         } catch (permError) {
             updateStatus(`Error requesting permission: ${permError.message}`);
             return;
         }
 
-        for (const item of itemsToSave) { // item is already confirmed active and modified
+        for (const item of itemsToSave) { 
             const newTagString = joinTags(item.tags);
-            const tagFileName = item.originalFullTagName || `${item.imageName}${TAG_EXTENSION}`;
-            const fullLogPath = item.relativePath ? `${item.relativePath}/${tagFileName}` : tagFileName;
+            // Determine the correct tag filename. If originalFullTagName exists and is specific (like image.png.txt), use that pattern.
+            // Otherwise, default to imageName.txt.
+            let tagFileNameToUse;
+            if (item.originalFullTagName && item.originalFullTagName.startsWith(item.imageName + item.originalFullImageName.substring(item.originalFullImageName.lastIndexOf('.')))) {
+                // Kohya-style: e.g. if image is "basename.png", tag is "basename.png.txt"
+                 tagFileNameToUse = item.imageName + item.originalFullImageName.substring(item.originalFullImageName.lastIndexOf('.')) + TAG_EXTENSION;
+            } else {
+                // Default: "basename.txt"
+                tagFileNameToUse = item.imageName + TAG_EXTENSION;
+            }
+
+
+            const fullLogPath = item.relativePath ? `${item.relativePath}/${tagFileNameToUse}` : tagFileNameToUse;
             try {
                 let tagHandle = item.tagHandle;
-                if (!tagHandle) { // Need to create the tag file
+                if (!tagHandle || (item.originalFullTagName && item.originalFullTagName !== tagFileNameToUse) ) { 
+                    // Need to get or create the handle, especially if the expected name changed
                     try {
                         let parentDirHandle = datasetHandle;
                         if (item.relativePath) {
@@ -1537,39 +1661,41 @@ document.addEventListener('DOMContentLoaded', () => {
                                 if (part) parentDirHandle = await parentDirHandle.getDirectoryHandle(part, { create: false });
                             }
                         }
-                        tagHandle = await parentDirHandle.getFileHandle(tagFileName, { create: true });
+                        // If an old handle exists but name is different, remove old before creating new to avoid issues.
+                        // This is tricky if it was renamed by unification. Best if saveAllChanges *always* uses the current expected name.
+                        tagHandle = await parentDirHandle.getFileHandle(tagFileNameToUse, { create: true });
                         item.tagHandle = tagHandle;
-                        item.originalFullTagName = tagFileName;
+                        item.originalFullTagName = tagFileNameToUse; // Update our record of the tag name
                     } catch (handleError) {
                         console.error(`Error getting/creating tag file handle for ${fullLogPath}:`, handleError);
-                        errorCount++; item.modified = true; // Keep modified true on error
+                        errorCount++; item.modified = true; 
                         continue;
                     }
                 }
                 const writable = await tagHandle.createWritable();
                 await writable.write(newTagString);
                 await writable.close();
-                item.originalTags = newTagString; // Update original tags baseline
+                item.originalTags = newTagString; 
                 item.modified = false;
                 savedCount++;
                 document.getElementById(item.id)?.classList.remove('modified');
             } catch (writeError) {
                 console.error(`Error saving file ${fullLogPath}:`, writeError);
-                errorCount++; item.modified = true; // Keep modified true on error
+                errorCount++; item.modified = true; 
             }
         }
         let finalMessage = `Saved ${savedCount} tag file(s).`;
         if (errorCount > 0) finalMessage += ` Failed to save ${errorCount}. Check console.`;
         
-        updateSaveAllButtonState(); // Will disable if all modified items were saved
-        recalculateAllTagStats(); // Stats might change if tags were consolidated etc.
+        updateSaveAllButtonState(); 
+        recalculateAllTagStats(); 
         updateStatus(finalMessage, false);
     }
 
-    function navigateEditor(direction) { // Operates on displayedImageDataIndices
+    function navigateEditor(direction) { 
         if (currentEditIndex === -1 || displayedImageDataIndices.length <= 1) return;
 
-        const currentGlobalIndex = currentEditIndex; // This is an index in allImageData
+        const currentGlobalIndex = currentEditIndex; 
         let currentDisplayIndexOfEditedItem = -1;
         for(let i=0; i < displayedImageDataIndices.length; i++){
             if(displayedImageDataIndices[i] === currentGlobalIndex){
@@ -1579,8 +1705,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         if(currentDisplayIndexOfEditedItem === -1) {
-             // Current edited item is not in the displayed list (e.g., filtered out after opening)
-             // Try to find the closest visible item or just close editor.
              console.warn("Edited item not in current display for navigation. Closing editor.");
              closeEditor();
              return;
@@ -1589,14 +1713,13 @@ document.addEventListener('DOMContentLoaded', () => {
         let nextItemDisplayIndex;
         if (direction === 'next') {
             nextItemDisplayIndex = (currentDisplayIndexOfEditedItem + 1) % displayedImageDataIndices.length;
-        } else { // previous
+        } else { 
             nextItemDisplayIndex = (currentDisplayIndexOfEditedItem - 1 + displayedImageDataIndices.length) % displayedImageDataIndices.length;
         }
         
-        // Save current editor changes if any, before navigating
         const itemBeingEdited = allImageData[currentGlobalIndex];
         if (!itemBeingEdited.isTrashed && editorTagsTextarea.value !== currentEditOriginalTagsString) {
-            saveEditorChanges(); // This also updates currentEditOriginalTagsString if successful
+            saveEditorChanges(); 
         }
 
         const nextGlobalIndexToOpen = displayedImageDataIndices[nextItemDisplayIndex];
@@ -1606,7 +1729,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateEditorNavButtonStates() {
-        // Nav buttons are disabled if only one item is displayed OR if the current item is trashed (no nav from trashed)
         const currentItem = (currentEditIndex !== -1) ? allImageData[currentEditIndex] : null;
         const disableNav = displayedImageDataIndices.length <= 1 || (currentItem && currentItem.isTrashed);
 
@@ -1621,24 +1743,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const lastCommaIndex = value.lastIndexOf(',');
         const currentTagFragment = (lastCommaIndex === -1 ? value : value.substring(lastCommaIndex + 1)).trimStart();
 
-        if (currentTagFragment.length === 0 && !value.endsWith(',')) { // Only hide if no fragment AND not ending with comma
+        if (currentTagFragment.length === 0 && !value.endsWith(',')) { 
             hideSuggestions();
             return;
         }
 
-        const existingTagsInInput = parseTags(value.substring(0, lastCommaIndex + 1)); // Tags before current fragment
+        const existingTagsInInput = parseTags(value.substring(0, lastCommaIndex + 1)); 
         
-        // Suggestions from uniqueTags (which are based on active items)
         currentSuggestions = [...uniqueTags] 
             .filter(tag => 
                 tag.toLowerCase().includes(currentTagFragment.toLowerCase()) && 
                 !existingTagsInInput.includes(tag)
             )
-            .sort((a,b) => a.localeCompare(b)) // Alphabetical sort
-            .slice(0, 10); // Limit to 10 suggestions
+            .sort((a,b) => a.localeCompare(b)) 
+            .slice(0, 10); 
 
         if (currentSuggestions.length > 0) {
-            editorTagSuggestionsBox.innerHTML = ''; // Clear previous
+            editorTagSuggestionsBox.innerHTML = ''; 
             const ul = document.createElement('ul');
             currentSuggestions.forEach((suggestion, index) => {
                 const li = document.createElement('li');
@@ -1651,7 +1772,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             editorTagSuggestionsBox.appendChild(ul);
             editorTagSuggestionsBox.classList.remove('hidden');
-            activeSuggestionIndex = -1; // Reset active suggestion
+            activeSuggestionIndex = -1; 
         } else {
             hideSuggestions();
         }
@@ -1674,11 +1795,10 @@ document.addEventListener('DOMContentLoaded', () => {
         suggestionInputTarget.value = `${beforeFragment}${suggestionText}, `;
         hideSuggestions();
         suggestionInputTarget.focus();
-        // Move cursor to end
         suggestionInputTarget.selectionStart = suggestionInputTarget.selectionEnd = suggestionInputTarget.value.length;
     }
 
-    function updateActiveSuggestion(newIndex) { // newIndex is for currentSuggestions array
+    function updateActiveSuggestion(newIndex) { 
         const items = editorTagSuggestionsBox.querySelectorAll('li');
         if (activeSuggestionIndex !== -1 && items[activeSuggestionIndex]) {
             items[activeSuggestionIndex].classList.remove('active-suggestion');
@@ -1695,17 +1815,14 @@ document.addEventListener('DOMContentLoaded', () => {
             updateStatus("No items selected for batch editing.");
             return;
         }
-        // Ensure all selected items are active (not trashed)
         const activeSelectedItemsData = [];
         selectedItemIds.forEach(id => {
-            const item = getActiveItemById(id); // Use helper that checks isTrashed
+            const item = getActiveItemById(id); 
             if (item) activeSelectedItemsData.push(item);
         });
 
         if (activeSelectedItemsData.length !== selectedItemIds.size) {
             updateStatus("Some selected items are trashed and cannot be batch edited. Deselect them or restore them.", false);
-            // Optionally, auto-deselect trashed items here and proceed if any active ones remain
-            // For now, just block if discrepancy.
             return;
         }
         if (activeSelectedItemsData.length === 0) {
@@ -1721,14 +1838,14 @@ document.addEventListener('DOMContentLoaded', () => {
         batchEditorStatus.textContent = '';
 
         let commonTags = new Set(activeSelectedItemsData[0].tags);
-        const allTagsInSelection = new Map(); // tag -> count
+        const allTagsInSelection = new Map(); 
 
         activeSelectedItemsData.forEach((item, idx) => {
             const currentItemTags = new Set(item.tags);
-            if (idx > 0) { // For common tags, intersect with previous
+            if (idx > 0) { 
                 commonTags = new Set([...commonTags].filter(tag => currentItemTags.has(tag)));
             }
-            item.tags.forEach(tag => { // For all tags in selection
+            item.tags.forEach(tag => { 
                 allTagsInSelection.set(tag, (allTagsInSelection.get(tag) || 0) + 1);
             });
         });
@@ -1747,7 +1864,7 @@ document.addEventListener('DOMContentLoaded', () => {
         let partialTagsFound = false;
         const sortedAllTags = [...allTagsInSelection.entries()].sort((a, b) => a[0].localeCompare(b[0]));
         sortedAllTags.forEach(([tag, count]) => {
-            if (!commonTags.has(tag)) { // Only show tags not in common
+            if (!commonTags.has(tag)) { 
                 partialTagsFound = true;
                 const span = document.createElement('span'); span.classList.add('tag'); span.textContent = tag;
                 const countSpan = document.createElement('span'); countSpan.classList.add('count');
@@ -1773,11 +1890,11 @@ document.addEventListener('DOMContentLoaded', () => {
         let modifiedCount = 0;
         let overallStatsChanged = false;
 
-        selectedItemIds.forEach(id => { // Iterate over original selection IDs
+        selectedItemIds.forEach(id => { 
             const index = findIndexById(id);
             if (index === -1) return; 
             const item = allImageData[index];
-            if (item.isTrashed) return; // Skip trashed items, though openBatchEditor should prevent this state
+            if (item.isTrashed) return; 
 
             const originalItemTagsString = joinTags(item.tags);
             let currentItemTagsSet = new Set(item.tags);
@@ -1785,7 +1902,7 @@ document.addEventListener('DOMContentLoaded', () => {
             tagsToAdd.forEach(tag => currentItemTagsSet.add(tag));
             tagsToRemove.forEach(tag => currentItemTagsSet.delete(tag));
             
-            const newItemTagsArray = [...currentItemTagsSet].sort(); // Convert set to sorted array
+            const newItemTagsArray = [...currentItemTagsSet].sort(); 
             const newItemTagsString = joinTags(newItemTagsArray);
 
             if (newItemTagsString !== originalItemTagsString) {
@@ -1813,10 +1930,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (modifiedCount > 0) {
             updateSaveAllButtonState();
-            if (overallStatsChanged) recalculateAllTagStats(); // Global recalculation
+            if (overallStatsChanged) recalculateAllTagStats(); 
             batchEditorStatus.textContent = `Tag changes applied to ${modifiedCount} item(s). Remember to "Save All Changes".`;
             batchEditorStatus.style.color = 'var(--success-color)';
-            batchEditorAddTagsInput.value = ''; // Clear inputs after successful application
+            batchEditorAddTagsInput.value = ''; 
             batchEditorRemoveTagsInput.value = '';
         } else {
             batchEditorStatus.textContent = "No changes made to selected items (tags might already be present/absent).";
@@ -1832,12 +1949,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (confirm(`Move ${selectedItemIds.size} selected item(s) to trash?`)) {
             let movedCount = 0;
-            // Create a copy of selectedItemIds because moveToTrash modifies it
             const idsToTrash = new Set(selectedItemIds); 
             idsToTrash.forEach(itemId => {
                 const item = allImageData.find(i => i.id === itemId);
                 if (item && !item.isTrashed) {
-                    moveToTrash(itemId); // This function handles individual UI and state updates
+                    moveToTrash(itemId); 
                     movedCount++;
                 }
             });
@@ -1848,7 +1964,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateStatus("No active items were moved to trash (they might have been already trashed).");
             }
             closeBatchEditor();
-            filterAndSearch(); // Refresh grid view as items are now trashed
+            filterAndSearch(); 
         } else {
             batchEditorStatus.textContent = "Move to trash cancelled.";
             batchEditorStatus.style.color = 'var(--status-color)';
@@ -1876,7 +1992,7 @@ document.addEventListener('DOMContentLoaded', () => {
             customRules = [];
             updateStatus("Error loading custom rules from storage. Check console.");
         }
-        if (customRules.length === 0) { // Add defaults if none exist
+        if (customRules.length === 0) { 
             customRules.push({
                 id: generateRuleId('default-replace-underscores'), name: "Default: Replace Underscores with Spaces",
                 find: "_", replace: " ", isRegex: false, isCaseSensitive: false, applyTo: "all", specificTags: []
@@ -2018,7 +2134,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         return tag;
     }
-    function performBulkCustomRulesOperation() { // Operates on active items
+    function performBulkCustomRulesOperation() { 
         const selectedRuleIds = Array.from(bulkApplyCustomRulesSelect.selectedOptions).map(opt => opt.value);
         if (selectedRuleIds.length === 0) { updateStatus("No custom rules selected."); return; }
         const rulesToApply = selectedRuleIds.map(id => customRules.find(r => r.id === id)).filter(r => r);
@@ -2033,7 +2149,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStatus(`Applying ${rulesToApply.length} custom rule(s) to active images...`, true);
         let modCount = 0; let affectedItemIds = new Set(); let overallStatsChanged = false;
 
-        activeItems.forEach(item => { // Iterate only over active items
+        activeItems.forEach(item => { 
             let originalItemTagsString = joinTags(item.tags);
             let currentItemTagsArray = [...item.tags];
             rulesToApply.forEach(rule => {
@@ -2062,6 +2178,484 @@ document.addEventListener('DOMContentLoaded', () => {
             updateStatus(`Rules applied. No changes to active items.`, false);
         }
     }
+
+    // --- Dataset Unification Logic ---
+    function toggleUnifyPaddingLengthGroup() {
+        unifyPaddingLengthGroup.style.display = unifyPadZerosCheckbox.checked ? 'block' : 'none';
+    }
+
+    function generateUnificationPreview() {
+        unifyPreviewOutput.innerHTML = '';
+        unifyApplyBtn.disabled = true;
+        unifyStatus.textContent = '';
+        unificationPreviewData = [];
+
+        const activeItems = getActiveItems();
+        if (activeItems.length === 0) {
+            unifyStatus.textContent = 'No active images to unify.';
+            unifyStatus.style.color = 'var(--status-color)';
+            return;
+        }
+
+        const prefix = unifyPrefixInput.value.trim();
+        let startNum = parseInt(unifyStartNumInput.value);
+        const padZeros = unifyPadZerosCheckbox.checked;
+        const paddingLength = parseInt(unifyPaddingLengthInput.value);
+
+        if (isNaN(startNum) || startNum < 0) {
+            unifyStatus.textContent = 'Invalid start number.';
+            unifyStatus.style.color = 'var(--error-color)';
+            return;
+        }
+        if (padZeros && (isNaN(paddingLength) || paddingLength < 1 || paddingLength > 10)) {
+            unifyStatus.textContent = 'Invalid padding length (must be 1-10).';
+            unifyStatus.style.color = 'var(--error-color)';
+            return;
+        }
+
+        const outputFragment = document.createDocumentFragment();
+        const newFilenamesSet = new Set();
+        let hasChanges = false;
+        let currentNum = startNum;
+
+        activeItems.forEach(item => {
+            const numberStr = padZeros ? String(currentNum).padStart(paddingLength, '0') : String(currentNum);
+            const originalExt = item.originalFullImageName.substring(item.originalFullImageName.lastIndexOf('.'));
+            const newBaseName = `${prefix}${numberStr}`;
+            const newImageName = `${newBaseName}${originalExt}`; // New image name maintains original extension
+            
+            let newTagName = null;
+            if (item.originalFullTagName) { // If a tag file existed
+                 // If original tag was like "base.ext.txt", new one should be "newBase.ext.txt"
+                if (item.originalFullTagName === item.imageName + originalExt + TAG_EXTENSION) {
+                    newTagName = newBaseName + originalExt + TAG_EXTENSION;
+                } 
+                // If original tag was like "base.txt", new one should be "newBase.txt"
+                else if (item.originalFullTagName === item.imageName + TAG_EXTENSION) {
+                    newTagName = newBaseName + TAG_EXTENSION;
+                } else {
+                    // Unknown or complex original tag naming, try to adapt based on new base name
+                    newTagName = newBaseName + TAG_EXTENSION; // Default to newBase.txt
+                    console.warn(`Unusual original tag name "${item.originalFullTagName}" for image "${item.originalFullImageName}". Defaulting new tag to "${newTagName}".`);
+                }
+            }
+
+
+            const oldDisplayPath = item.relativePath ? `${item.relativePath}/${item.originalFullImageName}` : item.originalFullImageName;
+            const newDisplayPath = item.relativePath ? `${item.relativePath}/${newImageName}` : newImageName;
+
+            let changeEntry = `<p><strong>${escapeHtml(oldDisplayPath)}</strong> → <strong>${escapeHtml(newDisplayPath)}</strong>`;
+            if (item.originalFullTagName && newTagName) {
+                 const oldTagDisplayPath = item.relativePath ? `${item.relativePath}/${item.originalFullTagName}` : item.originalFullTagName;
+                 const newTagDisplayPath = item.relativePath ? `${item.relativePath}/${newTagName}` : newTagName;
+                 if (item.originalFullTagName !== newTagName) { // Only show if tag name actually changes
+                    changeEntry += `<br>&nbsp;&nbsp;&nbsp;<em>${escapeHtml(oldTagDisplayPath)}</em> → <em>${escapeHtml(newTagDisplayPath)}</em>`;
+                 }
+            }
+            changeEntry += `</p>`;
+            const p = document.createElement('div'); 
+            p.innerHTML = changeEntry;
+            outputFragment.appendChild(p);
+
+            if (item.originalFullImageName !== newImageName || (item.originalFullTagName && newTagName && item.originalFullTagName !== newTagName)) {
+                hasChanges = true;
+            }
+
+            unificationPreviewData.push({
+                itemId: item.id,
+                oldImageName: item.originalFullImageName,
+                newImageName: newImageName,
+                oldTagName: item.originalFullTagName, 
+                newTagName: newTagName,             
+                relativePath: item.relativePath,
+            });
+
+            const fullNewPathKey = item.relativePath ? `${item.relativePath}/${newImageName}` : newImageName;
+            if (newFilenamesSet.has(fullNewPathKey)) {
+                 unifyStatus.textContent = `Error: Generated filename collision for "${escapeHtml(fullNewPathKey)}". Adjust prefix, start number, or padding.`;
+                 unifyStatus.style.color = 'var(--error-color)';
+                 unifyPreviewOutput.innerHTML = ''; 
+                 unificationPreviewData = []; 
+                 return; 
+            }
+            newFilenamesSet.add(fullNewPathKey);
+            currentNum++;
+        });
+
+        if (unifyStatus.textContent.startsWith('Error:')) return; 
+
+        if (unificationPreviewData.length > 0) {
+            unifyPreviewOutput.appendChild(outputFragment);
+            if (hasChanges) {
+                unifyApplyBtn.disabled = false;
+                unifyStatus.textContent = `Previewing ${unificationPreviewData.length} potential renames. Please verify.`;
+                unifyStatus.style.color = 'var(--status-color)';
+            } else {
+                unifyStatus.textContent = 'No filename changes based on current settings.';
+                unifyStatus.style.color = 'var(--status-color)';
+            }
+        } else {
+            unifyStatus.textContent = 'No active items to preview for unification.';
+            unifyStatus.style.color = 'var(--status-color)';
+        }
+    }
+
+    async function applyUnification() {
+        if (unificationPreviewData.length === 0 || unifyApplyBtn.disabled) {
+            unifyStatus.textContent = 'No changes to apply or preview first.';
+            unifyStatus.style.color = 'var(--error-color)';
+            return;
+        }
+
+        if (!confirm(`This will rename ${unificationPreviewData.length} file(s) on your disk based on the preview. This action is IRREVERSIBLE. Are you sure you want to proceed?`)) {
+            unifyStatus.textContent = 'Unification cancelled by user.';
+            unifyStatus.style.color = 'var(--status-color)';
+            return;
+        }
+
+        updateStatus('Applying unification renames...', true);
+        unifyApplyBtn.disabled = true;
+        let successCount = 0;
+        let errorCount = 0;
+
+        try {
+             if (!datasetHandle || (await datasetHandle.queryPermission({ mode: 'readwrite' }) !== 'granted' &&
+                await datasetHandle.requestPermission({ mode: 'readwrite' }) !== 'granted')) {
+                updateStatus('Error: Write permission denied. Cannot rename files.');
+                unifyStatus.textContent = 'Write permission denied.';
+                unifyStatus.style.color = 'var(--error-color)';
+                return;
+            }
+
+            for (const change of unificationPreviewData) {
+                const item = allImageData.find(i => i.id === change.itemId);
+                if (!item) { errorCount++; console.warn(`Item ${change.itemId} not found during apply unification.`); continue; }
+                if (item.isTrashed) { console.warn(`Skipping trashed item ${change.itemId} for unification.`); continue; }
+
+                let parentDirHandle = datasetHandle;
+                if (item.relativePath) {
+                    try {
+                        const parts = item.relativePath.split('/');
+                        for (const p of parts) {
+                            if (p) parentDirHandle = await parentDirHandle.getDirectoryHandle(p, { create: false });
+                        }
+                    } catch (e) {
+                        console.error(`Error navigating to directory ${item.relativePath} for ${item.originalFullImageName}: ${e}`);
+                        errorCount++; continue;
+                    }
+                }
+                
+                let itemRenameError = false;
+                // 1. Rename Image File
+                if (item.imageHandle && change.oldImageName !== change.newImageName) {
+                    try {
+                        await item.imageHandle.move(parentDirHandle, change.newImageName); 
+                                                
+                        item.imageHandle = await parentDirHandle.getFileHandle(change.newImageName); 
+                        if (item.imageUrl) URL.revokeObjectURL(item.imageUrl);
+                        const newFile = await item.imageHandle.getFile();
+                        item.imageUrl = URL.createObjectURL(newFile);
+                        item.originalFullImageName = change.newImageName;
+                        item.imageName = change.newImageName.substring(0, change.newImageName.lastIndexOf('.'));
+                    } catch (e) {
+                        console.error(`Error renaming image "${change.oldImageName}" to "${change.newImageName}" in ${parentDirHandle.name}: ${e}`);
+                        errorCount++; itemRenameError = true;
+                    }
+                }
+
+                // 2. Rename Tag File
+                if (!itemRenameError && item.tagHandle && change.oldTagName && change.newTagName && change.oldTagName !== change.newTagName) {
+                    try {
+                        await item.tagHandle.move(parentDirHandle, change.newTagName); 
+
+                        item.tagHandle = await parentDirHandle.getFileHandle(change.newTagName); 
+                        item.originalFullTagName = change.newTagName;
+                    } catch (e) {
+                        console.error(`Error renaming tag "${change.oldTagName}" to "${change.newTagName}" in ${parentDirHandle.name}: ${e}`);
+                        errorCount++; 
+                    }
+                } else if (!itemRenameError && !item.tagHandle && change.newTagName && item.originalFullImageName !== change.newImageName) {
+                    // If image was renamed and there was NO original tag file, we still update the expected tag name.
+                    // This is mostly for data consistency if a tag file *were* to be created later for the new image name.
+                    item.originalFullTagName = change.newTagName; // This might set it to null if change.newTagName is null
+                }
+
+
+                if (!itemRenameError) { 
+                    item.modified = false; 
+                    document.getElementById(item.id)?.classList.remove('modified');
+                    successCount++;
+                }
+            }
+
+        } catch (e) {
+            updateStatus(`Error during unification: ${e.message}`, false);
+            unifyStatus.textContent = `Error: ${e.message}`;
+            unifyStatus.style.color = 'var(--error-color)';
+        } finally {
+            unifyPreviewOutput.innerHTML = '';
+            unificationPreviewData = [];
+            unifyApplyBtn.disabled = true;
+            
+            let finalMsg = `Unification complete. ${successCount} item(s) processed successfully.`;
+            if (errorCount > 0) finalMsg += ` ${errorCount} errors occurred (see console).`;
+            unifyStatus.textContent = finalMsg;
+            unifyStatus.style.color = errorCount > 0 ? 'var(--error-color)' : 'var(--success-color)';
+            
+            updateStatus(finalMsg, false);
+            filterAndSearch(); 
+            recalculateAllTagStats(); 
+        }
+    }
+
+    // --- Image Format Conversion ---
+    function getTargetFormatDetails(formatValue) {
+        switch (formatValue.toLowerCase()) {
+            case 'png': return { mime: 'image/png', ext: '.png', qualityApplies: false, defaultQuality: 1.0 };
+            case 'jpeg': return { mime: 'image/jpeg', ext: '.jpg', qualityApplies: true, defaultQuality: 0.92 };
+            case 'webp': return { mime: 'image/webp', ext: '.webp', qualityApplies: true, defaultQuality: 0.80 };
+            default: return null;
+        }
+    }
+
+    function toggleConversionQualityUI() {
+        const selectedFormat = convertFormatSelect.value;
+        const details = getTargetFormatDetails(selectedFormat);
+        if (details && details.qualityApplies) {
+            convertQualityGroup.style.display = 'block';
+            convertQualitySlider.value = details.defaultQuality * 100;
+            convertQualityValue.textContent = convertQualitySlider.value;
+        } else {
+            convertQualityGroup.style.display = 'none';
+        }
+    }
+
+    function generateConversionPreview() {
+        convertPreviewOutput.innerHTML = '';
+        convertApplyBtn.disabled = true;
+        convertStatus.textContent = '';
+        conversionPreviewData = [];
+
+        const activeItems = getActiveItems();
+        if (activeItems.length === 0) {
+            convertStatus.textContent = 'No active images to convert.';
+            convertStatus.style.color = 'var(--status-color)';
+            return;
+        }
+
+        const targetFormatValue = convertFormatSelect.value;
+        const targetDetails = getTargetFormatDetails(targetFormatValue);
+        if (!targetDetails) {
+            convertStatus.textContent = 'Invalid target format selected.';
+            convertStatus.style.color = 'var(--error-color)';
+            return;
+        }
+        const quality = targetDetails.qualityApplies ? parseInt(convertQualitySlider.value) / 100 : 1.0;
+
+        const outputFragment = document.createDocumentFragment();
+        let itemsToConvertCount = 0;
+
+        activeItems.forEach(item => {
+            const currentExt = item.originalFullImageName.substring(item.originalFullImageName.lastIndexOf('.')).toLowerCase();
+            
+            if (currentExt === targetDetails.ext) {
+                return; // Already in target format
+            }
+
+            itemsToConvertCount++;
+            const newImageFullName = item.imageName + targetDetails.ext; // Basename + new extension
+
+            let newTagFullName = item.originalFullTagName; // Assume tag name doesn't change unless it's Kohya-style
+            if (item.originalFullTagName) {
+                // Check if original tag name was like "basename.original_ext.txt"
+                const originalImageExtInTag = item.originalFullImageName.substring(item.originalFullImageName.lastIndexOf('.'));
+                if (item.originalFullTagName === item.imageName + originalImageExtInTag + TAG_EXTENSION) {
+                    newTagFullName = item.imageName + targetDetails.ext + TAG_EXTENSION;
+                }
+                // If it was just "basename.txt", newTagFullName will remain "basename.txt" (no change)
+            }
+            
+            const oldDisplayPath = item.relativePath ? `${item.relativePath}/${item.originalFullImageName}` : item.originalFullImageName;
+            const newDisplayPath = item.relativePath ? `${item.relativePath}/${newImageFullName}` : newImageFullName;
+            
+            let changeEntry = `<p><strong>${escapeHtml(oldDisplayPath)}</strong> → <strong>${escapeHtml(newDisplayPath)}</strong>`;
+            if (newTagFullName && item.originalFullTagName !== newTagFullName) {
+                 const oldTagDisplayPath = item.relativePath ? `${item.relativePath}/${item.originalFullTagName}` : item.originalFullTagName;
+                 const newTagDisplayPath = item.relativePath ? `${item.relativePath}/${newTagFullName}` : newTagFullName;
+                 changeEntry += `<br>&nbsp;&nbsp;&nbsp;<em>${escapeHtml(oldTagDisplayPath)}</em> → <em>${escapeHtml(newTagDisplayPath)}</em>`;
+            } else if (newTagFullName && item.originalFullTagName === newTagFullName && item.tagHandle) {
+                 changeEntry += `<br>&nbsp;&nbsp;&nbsp;<em>Tag file (${escapeHtml(newTagFullName)}) remains.</em>`;
+            }
+            changeEntry += `</p>`;
+            const p = document.createElement('div');
+            p.innerHTML = changeEntry;
+            outputFragment.appendChild(p);
+
+            conversionPreviewData.push({
+                itemId: item.id,
+                oldImageName: item.originalFullImageName,
+                newImageName: newImageFullName,
+                oldTagName: item.originalFullTagName,
+                newTagName: newTagFullName,
+                relativePath: item.relativePath,
+                targetMime: targetDetails.mime,
+                quality: quality
+            });
+        });
+
+        if (itemsToConvertCount > 0) {
+            convertPreviewOutput.appendChild(outputFragment);
+            convertApplyBtn.disabled = false;
+            convertStatus.textContent = `Previewing ${itemsToConvertCount} image(s) for conversion. Verify quality implications.`;
+            convertStatus.style.color = 'var(--status-color)';
+            if (targetDetails.mime === 'image/jpeg') {
+                 convertStatus.textContent += " (PNG/GIF to JPEG may lose transparency/animation).";
+            }
+        } else {
+            convertStatus.textContent = 'No images require conversion to the selected format.';
+            convertStatus.style.color = 'var(--status-color)';
+        }
+    }
+    
+    async function convertAndSaveImageFile(item, targetMime, quality, newFullImageName, newFullTagName) {
+        return new Promise(async (resolve, reject) => {
+            const img = new Image();
+            img.onload = async () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.naturalWidth;
+                canvas.height = img.naturalHeight;
+                const ctx = canvas.getContext('2d');
+                if (targetMime === 'image/jpeg' || targetMime === 'image/webp') { // Fill background for formats that don't support transparency well by default
+                    ctx.fillStyle = '#FFFFFF'; // White background
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                }
+                ctx.drawImage(img, 0, 0);
+
+                canvas.toBlob(async (blob) => {
+                    if (!blob) {
+                        reject(new Error(`Failed to create blob for ${item.originalFullImageName}`));
+                        return;
+                    }
+                    try {
+                        let parentDirHandle = datasetHandle;
+                        if (item.relativePath) {
+                            const parts = item.relativePath.split('/');
+                            for (const p of parts) {
+                                if (p) parentDirHandle = await parentDirHandle.getDirectoryHandle(p, { create: false });
+                            }
+                        }
+
+                        // 1. Save new image file
+                        const newImageFileHandle = await parentDirHandle.getFileHandle(newFullImageName, { create: true });
+                        const writable = await newImageFileHandle.createWritable();
+                        await writable.write(blob);
+                        await writable.close();
+
+                        // 2. Delete old image file (if different name)
+                        if (item.originalFullImageName !== newFullImageName) {
+                             await parentDirHandle.removeEntry(item.originalFullImageName);
+                        }
+                        
+                        // Update item data
+                        if (item.imageUrl) URL.revokeObjectURL(item.imageUrl);
+                        const newFileForUrl = await newImageFileHandle.getFile();
+                        item.imageUrl = URL.createObjectURL(newFileForUrl);
+                        item.imageHandle = newImageFileHandle;
+                        item.originalFullImageName = newFullImageName;
+                        item.imageName = newFullImageName.substring(0, newFullImageName.lastIndexOf('.'));
+                        item.fileSize = newFileForUrl.size;
+                        item.lastModified = newFileForUrl.lastModified;
+
+
+                        // 3. Rename tag file if necessary
+                        if (item.tagHandle && item.originalFullTagName && newFullTagName && item.originalFullTagName !== newFullTagName) {
+                            try {
+                                await item.tagHandle.move(parentDirHandle, newFullTagName);
+                                item.tagHandle = await parentDirHandle.getFileHandle(newFullTagName);
+                                item.originalFullTagName = newFullTagName;
+                            } catch (tagRenameError) {
+                                console.warn(`Converted image but failed to rename tag file for ${item.id}: ${tagRenameError.message}`);
+                                // Continue, as image conversion was the primary goal
+                            }
+                        } else if (item.tagHandle && item.originalFullTagName && !newFullTagName) {
+                            // This case should ideally not happen if logic in preview is correct
+                            // Means a tag file existed but new logic says it shouldn't have a new name (e.g. it was image.txt and base didn't change)
+                            // No action needed for tag file name itself.
+                        }
+                        resolve();
+                    } catch (fileError) {
+                        reject(fileError);
+                    }
+                }, targetMime, quality);
+            };
+            img.onerror = () => {
+                reject(new Error(`Failed to load image ${item.originalFullImageName} for conversion.`));
+            };
+            img.src = item.imageUrl; // Trigger load
+        });
+    }
+
+
+    async function applyImageConversion() {
+        if (conversionPreviewData.length === 0 || convertApplyBtn.disabled) {
+            convertStatus.textContent = 'No conversions to apply or preview first.';
+            convertStatus.style.color = 'var(--error-color)';
+            return;
+        }
+        if (!confirm(`This will convert ${conversionPreviewData.length} image(s) on your disk. Original files will be replaced. This action is IRREVERSIBLE and may affect image quality. Proceed?`)) {
+            convertStatus.textContent = 'Conversion cancelled by user.';
+            convertStatus.style.color = 'var(--status-color)';
+            return;
+        }
+
+        updateStatus('Applying image format conversions...', true);
+        convertApplyBtn.disabled = true;
+        let successCount = 0;
+        let errorCount = 0;
+
+        try {
+            if (!datasetHandle || (await datasetHandle.queryPermission({ mode: 'readwrite' }) !== 'granted' &&
+                await datasetHandle.requestPermission({ mode: 'readwrite' }) !== 'granted')) {
+                updateStatus('Error: Write permission denied.');
+                convertStatus.textContent = 'Write permission denied.';
+                convertStatus.style.color = 'var(--error-color)';
+                return;
+            }
+
+            for (const conv of conversionPreviewData) {
+                const item = allImageData.find(i => i.id === conv.itemId);
+                if (!item || item.isTrashed) {
+                    console.warn(`Skipping conversion for item ${conv.itemId} (not found or trashed).`);
+                    continue;
+                }
+                try {
+                    await convertAndSaveImageFile(item, conv.targetMime, conv.quality, conv.newImageName, conv.newTagName);
+                    successCount++;
+                } catch (conversionError) {
+                    console.error(`Error converting item ${item.id} (${item.originalFullImageName}): ${conversionError.message}`);
+                    errorCount++;
+                }
+            }
+        } catch (e) {
+            updateStatus(`Error during conversion process: ${e.message}`, false);
+            convertStatus.textContent = `Error: ${e.message}`;
+            convertStatus.style.color = 'var(--error-color)';
+        } finally {
+            conversionPreviewData = [];
+            convertPreviewOutput.innerHTML = '';
+            convertApplyBtn.disabled = true;
+
+            let finalMsg = `Conversion complete. ${successCount} image(s) converted.`;
+            if (errorCount > 0) finalMsg += ` ${errorCount} errors (see console).`;
+            convertStatus.textContent = finalMsg;
+            convertStatus.style.color = errorCount > 0 ? 'var(--error-color)' : 'var(--success-color)';
+
+            updateStatus(finalMsg, false);
+            filterAndSearch(); // Re-render grid with new image URLs and info
+            recalculateAllTagStats(); // Though tags themselves didn't change, file info did
+        }
+    }
+
 
     // --- Global Event Handlers ---
     function handleGlobalKeyDown(event) {
@@ -2103,6 +2697,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isInputFocusedGeneral && activeElement.value !== '') {
                 activeElement.value = '';
                 if (activeElement.id === 'tag-frequency-search') activeElement.dispatchEvent(new Event('input', { bubbles: true }));
+                if (activeElement.id === 'unify-preview-output') { unifyPreviewOutput.innerHTML = ''; unifyApplyBtn.disabled = true; unifyStatus.textContent = ''; unificationPreviewData = []; }
+                if (activeElement.id === 'convert-preview-output') { convertPreviewOutput.innerHTML = ''; convertApplyBtn.disabled = true; convertStatus.textContent = ''; conversionPreviewData = []; }
                 return;
             }
             if (keyboardFocusIndex !== -1) { clearKeyboardFocus(); return; }
@@ -2115,14 +2711,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 case 'rename-old-tag': case 'rename-new-tag': buttonToClick = renameTagBtn; break;
                 case 'remove-tag-name': buttonToClick = removeTagBtn; break;
                 case 'add-trigger-words': buttonToClick = addTagsBtn; break;
-                case 'tag-frequency-search': event.preventDefault(); return; // Don't trigger anything
+                case 'tag-frequency-search': event.preventDefault(); return; 
                 case 'sort-property': case 'sort-order': buttonToClick = applySortBtn; break;
+                case 'unify-prefix': case 'unify-start-number': case 'unify-padding-length': buttonToClick = unifyPreviewBtn; break;
+                case 'convert-format-select': case 'convert-quality-slider': buttonToClick = convertPreviewBtn; break;
             }
             if (buttonToClick && !buttonToClick.disabled) { event.preventDefault(); buttonToClick.click(); return; }
         }
         
         const currentEditorItem = (currentEditIndex !== -1) ? allImageData[currentEditIndex] : null;
-        if (isSingleEditorOpen && !isTextareaFocused && !isImageZoomed && (!currentEditorItem || !currentEditorItem.isTrashed)) { // Nav only if editor open AND not on textarea AND image not zoomed AND item not trashed
+        if (isSingleEditorOpen && !isTextareaFocused && !isImageZoomed && (!currentEditorItem || !currentEditorItem.isTrashed)) { 
             if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
                 event.preventDefault();
                 navigateEditor(event.key === 'ArrowLeft' ? 'previous' : 'next');
@@ -2131,14 +2729,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (!isModalOpen && !isInputFocusedGeneral && displayedImageDataIndices.length > 0) {
-            let newFocusDisplayIndex = keyboardFocusIndex; // keyboardFocusIndex is index in displayedImageDataIndices
+            let newFocusDisplayIndex = keyboardFocusIndex; 
             let handled = false;
             if (newFocusDisplayIndex === -1 && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
                 newFocusDisplayIndex = 0; handled = true;
-            } else if (newFocusDisplayIndex !== -1) { // Only if already focused
+            } else if (newFocusDisplayIndex !== -1) { 
                 let columns = 1;
                 const gridWidth = imageGrid.offsetWidth;
-                const firstItemElement = imageGrid.querySelector('.grid-item:not(.trashed-item)'); // Use an active item for measurement
+                const firstItemElement = imageGrid.querySelector('.grid-item:not(.trashed-item)'); 
                 if (firstItemElement) {
                     const itemStyle = getComputedStyle(firstItemElement);
                     const itemOuterWidth = firstItemElement.offsetWidth + parseInt(itemStyle.marginLeft) + parseInt(itemStyle.marginRight);
@@ -2152,7 +2750,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     case 'Enter':
                         const globalIdx = displayedImageDataIndices[keyboardFocusIndex];
                         const itemToOpen = allImageData[globalIdx];
-                        if (itemToOpen && !itemToOpen.isTrashed) { // Can only open non-trashed
+                        if (itemToOpen && !itemToOpen.isTrashed) { 
                             clearSelection(); addSelection(itemToOpen.id); openEditor(itemToOpen.id);
                         }
                         handled = true; break;
@@ -2169,7 +2767,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function toggleEditorImageZoom() {
         editorImagePreview.classList.toggle('zoomed');
-        editorModalContent.classList.toggle('image-zoomed'); // Used to hide other content
+        editorModalContent.classList.toggle('image-zoomed'); 
     }
 
     function handleDocumentClickToClearSelection(event) {
@@ -2180,7 +2778,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const clickedOnGridItem = event.target.closest('.grid-item');
         const clickedOnBatchEditBtn = event.target.closest('#batch-edit-selection-btn');
-        // Don't clear selection if clicking on these specific elements
         if (!clickedOnGridItem && !clickedOnBatchEditBtn) {
             if (selectedItemIds.size > 0) clearSelection();
         }
@@ -2198,7 +2795,7 @@ document.addEventListener('DOMContentLoaded', () => {
     applySortBtn.addEventListener('click', () => {
         currentSortProperty = sortPropertySelect.value;
         currentSortOrder = sortOrderSelect.value;
-        filterAndSearch(); // Re-filter implies re-sort and re-render
+        filterAndSearch(); 
     });
 
     renameTagBtn.addEventListener('click', () => performStandardBulkOperation('rename'));
@@ -2210,6 +2807,16 @@ document.addEventListener('DOMContentLoaded', () => {
     findOrphanedMissingBtn.addEventListener('click', findOrphanedAndMissingTagFiles);
     findCaseInconsistentTagsBtn.addEventListener('click', findCaseInconsistentTags);
     exportUniqueTagsBtn.addEventListener('click', exportUniqueTagList);
+
+    unifyPadZerosCheckbox.addEventListener('change', toggleUnifyPaddingLengthGroup);
+    unifyPreviewBtn.addEventListener('click', generateUnificationPreview);
+    unifyApplyBtn.addEventListener('click', applyUnification);
+
+    convertFormatSelect.addEventListener('change', toggleConversionQualityUI);
+    convertQualitySlider.addEventListener('input', () => { convertQualityValue.textContent = convertQualitySlider.value; });
+    convertPreviewBtn.addEventListener('click', generateConversionPreview);
+    convertApplyBtn.addEventListener('click', applyImageConversion);
+
 
     createNewRuleBtn.addEventListener('click', () => openRuleEditor());
     ruleEditorCancelBtn.addEventListener('click', closeRuleEditor);
@@ -2244,7 +2851,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Initial Setup ---
     loadInitialTheme();
-    loadCustomRules(); // Also populates dropdown
+    loadCustomRules(); 
+    toggleUnifyPaddingLengthGroup(); 
+    toggleConversionQualityUI(); // Initial state for conversion quality UI
     sortPropertySelect.value = currentSortProperty;
     sortOrderSelect.value = currentSortOrder;
     updateStatus('Ready. Load a dataset folder.');
@@ -2255,7 +2864,8 @@ document.addEventListener('DOMContentLoaded', () => {
         updateStatus("Warning: Browser lacks File System Access API. Core functionality limited.");
         [loadDatasetBtn, saveAllBtn, emptyTrashBtn, batchEditSelectionBtn, applySortBtn, createNewRuleBtn, bulkApplyCustomRulesBtn,
          renameTagBtn, removeTagBtn, addTagsBtn, removeDuplicatesBtn, 
-         findDuplicateFilesBtn, findOrphanedMissingBtn, findCaseInconsistentTagsBtn, exportUniqueTagsBtn]
+         findDuplicateFilesBtn, findOrphanedMissingBtn, findCaseInconsistentTagsBtn, exportUniqueTagsBtn,
+         unifyPreviewBtn, unifyApplyBtn, convertPreviewBtn, convertApplyBtn]
         .forEach(btn => { if (btn) btn.disabled = true; });
     }
 });
